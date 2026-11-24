@@ -1,7 +1,17 @@
-//! Carga y almacenamiento de imágenes sin ventana ni GPU (H6).
+//! Carga y almacenamiento de assets sin ventana ni GPU (H6/H7).
 //!
-//! `image` queda confinado en este crate (ADR-012). Por ahora solo se
-//! decodifica PNG; el formato de referencias en escenas se decide en ADR-008.
+//! `image` y `gltf` quedan confinados en este crate (ADR-012, ADR-013). El
+//! formato de referencias en escenas se decide en ADR-008.
+
+#[cfg(feature = "gltf")]
+pub mod gltf;
+
+#[cfg(feature = "gltf")]
+pub use self::gltf::{
+    AccessorComponent, AccessorData, AccessorElements, AccessorShape, AlphaMode, AttributeType,
+    GltfDocument, GltfHandle, GltfLoadError, GltfStore, MaterialData, MeshData, NodeData,
+    PrimitiveData, PrimitiveMode, SceneData, TextureData,
+};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -35,7 +45,7 @@ impl fmt::Display for ImageHandle {
 /// Errores de carga de imágenes, sin exponer `image` ni `std::io` en la API.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageLoadError {
-    /// Los bytes no contienen una imagen PNG válida.
+    /// Los bytes no contienen una imagen PNG/JPEG válida.
     Decode(String),
     /// No se pudo leer el archivo.
     Io(String),
@@ -96,7 +106,7 @@ impl ImageStore {
         Self::default()
     }
 
-    /// Decodifica bytes PNG y guarda la imagen.
+    /// Decodifica bytes PNG/JPEG y guarda la imagen.
     pub fn load_from_bytes(&mut self, bytes: &[u8]) -> Result<ImageHandle, ImageLoadError> {
         if bytes.is_empty() {
             return Err(ImageLoadError::EmptyImage);
@@ -117,7 +127,7 @@ impl ImageStore {
         self.insert(data)
     }
 
-    /// Lee un archivo PNG del disco y guarda la imagen decodificada.
+    /// Lee un archivo PNG/JPEG del disco y guarda la imagen decodificada.
     pub fn load_from_path<P: AsRef<Path>>(
         &mut self,
         path: P,

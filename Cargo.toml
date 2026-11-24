@@ -38,7 +38,8 @@ publish = false
 bevy_ecs = "0.20.1"
 cxx = "1.0.205"
 cxx-build = "1.0.205"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+gltf = { version = "1.4.1", default-features = false, features = ["import", "names", "guess_mime_type"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 rapier2d = { version = "0.36.1", default-features = false, features = ["dim2", "f32", "std"] }
 rapier3d = { version = "0.36.1", default-features = false, features = ["dim3", "f32", "std"] }
 wgpu = "30.0.2"
@@ -73,11 +74,12 @@ lunar_bridge = { workspace = true, optional = true }
 lunar_runtime = { workspace = true, optional = true }
 
 [features]
-default = ["dim2", "dim3", "assets", "audio", "bridge", "runtime"]
+default = ["dim2", "dim3", "assets", "gltf", "audio", "bridge", "runtime"]
 render = ["dep:lunar_render", "lunar_platform/render"]
 dim2 = ["render", "dep:lunar_render2d", "dep:lunar_physics2d"]
 dim3 = ["render", "dep:lunar_render3d", "dep:lunar_physics3d"]
 assets = ["dep:lunar_assets"]
+gltf = ["assets", "lunar_assets/gltf"]
 audio = ["dep:lunar_audio"]
 bridge = ["dep:lunar_bridge"]
 runtime = ["dep:lunar_runtime"]
