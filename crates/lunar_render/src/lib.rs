@@ -7,6 +7,7 @@ mod viewport;
 
 pub use viewport::{InvalidViewport, Viewport, ViewportState};
 
+use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
 use std::future::Future;
@@ -14,10 +15,14 @@ use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
 use wgpu::{
-    Adapter, Color, CommandEncoderDescriptor, CurrentSurfaceTexture, Device, DeviceDescriptor,
-    Instance, LoadOp, Operations, Queue, RenderPassColorAttachment, RenderPassDescriptor,
-    RequestAdapterOptions, StoreOp, Surface, SurfaceConfiguration, SurfaceTexture,
-    TextureViewDescriptor,
+    Adapter, Buffer, BufferDescriptor, BufferUsages, Color, ColorTargetState, ColorWrites,
+    CommandEncoderDescriptor, CurrentSurfaceTexture, Device, DeviceDescriptor, FragmentState,
+    Instance, LoadOp, Operations, PipelineCompilationOptions, PipelineLayoutDescriptor,
+    PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDescriptor,
+    RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor,
+    ShaderSource, StoreOp, Surface, SurfaceConfiguration, SurfaceTexture, TextureFormat,
+    TextureViewDescriptor, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState,
+    VertexStepMode,
 };
 
 /// Color con el que se limpia el frame del smoke H2.
@@ -98,6 +103,9 @@ pub struct Renderer<'surface> {
     config: SurfaceConfiguration,
     viewport: ViewportState,
     clear_color: Color,
+    triangle_pipeline: RenderPipeline,
+    triangle_buffer: Buffer,
+    has_triangle: bool,
     needs_reconfigure: bool,
 }
 
@@ -135,6 +143,8 @@ impl<'surface> Renderer<'surface> {
             .get_default_config(&adapter, initial.width, initial.height)
             .ok_or(RenderError::SurfaceConfig)?;
         surface.configure(&device, &config);
+        let (triangle_pipeline, triangle_buffer) =
+            create_triangle_resources(&device, config.format);
 
         Ok(Self {
             surface,
@@ -143,6 +153,9 @@ impl<'surface> Renderer<'surface> {
             config,
             viewport: ViewportState::new(viewport),
             clear_color: DEFAULT_CLEAR_COLOR,
+            triangle_pipeline,
+            triangle_buffer,
+            has_triangle: false,
             needs_reconfigure: false,
         })
     }
@@ -150,6 +163,29 @@ impl<'surface> Renderer<'surface> {
     /// Cambia el color de limpieza.
     pub fn set_clear_color(&mut self, clear_color: Color) {
         self.clear_color = clear_color;
+    }
+
+    /// Define el triángulo de demo en coordenadas NDC, con color RGBA.
+    ///
+    /// Se usa para hacer verificable el gancho de frame de ADR-017; no pretende
+    /// ser un pipeline de render completo.
+    pub fn set_triangle(&mut self, vertices: [[f32; 2]; 3], color: [f32; 4]) {
+        let mut bytes = Vec::with_capacity(3 * 6 * std::mem::size_of::<f32>());
+        for vertex in vertices {
+            for component in vertex {
+                bytes.extend_from_slice(&component.to_le_bytes());
+            }
+            for component in color {
+                bytes.extend_from_slice(&component.to_le_bytes());
+            }
+        }
+        self.queue.write_buffer(&self.triangle_buffer, 0, &bytes);
+        self.has_triangle = true;
+    }
+
+    /// Oculta el triángulo de demo.
+    pub fn clear_triangle(&mut self) {
+        self.has_triangle = false;
     }
 
     /// Devuelve el tamaño actualmente renderizable.
@@ -222,8 +258,8 @@ impl<'surface> Renderer<'surface> {
             .device
             .create_command_encoder(&CommandEncoderDescriptor::default());
         {
-            encoder.begin_render_pass(&RenderPassDescriptor {
-                label: Some("lunar clear"),
+            let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+                label: Some("lunar frame"),
                 color_attachments: &[Some(RenderPassColorAttachment {
                     view: &view,
                     depth_slice: None,
@@ -235,9 +271,78 @@ impl<'surface> Renderer<'surface> {
                 })],
                 ..RenderPassDescriptor::default()
             });
+            if self.has_triangle {
+                pass.set_pipeline(&self.triangle_pipeline);
+                pass.set_vertex_buffer(0, self.triangle_buffer.slice(..));
+                pass.draw(0..3, 0..1);
+            }
         }
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(texture);
         Ok(())
     }
+}
+
+fn create_triangle_resources(device: &Device, format: TextureFormat) -> (RenderPipeline, Buffer) {
+    let shader = device.create_shader_module(ShaderModuleDescriptor {
+        label: Some("lunar triangle shader"),
+        source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("triangle.wgsl"))),
+    });
+    let layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("lunar triangle layout"),
+        bind_group_layouts: &[],
+        immediate_size: 0,
+    });
+    let attributes = [
+        VertexAttribute {
+            format: VertexFormat::Float32x2,
+            offset: 0,
+            shader_location: 0,
+        },
+        VertexAttribute {
+            format: VertexFormat::Float32x4,
+            offset: 8,
+            shader_location: 1,
+        },
+    ];
+    let buffers = [Some(VertexBufferLayout {
+        array_stride: 24,
+        step_mode: VertexStepMode::Vertex,
+        attributes: &attributes,
+    })];
+    let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+        label: Some("lunar triangle pipeline"),
+        layout: Some(&layout),
+        vertex: VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: PipelineCompilationOptions::default(),
+            buffers: &buffers,
+        },
+        primitive: PrimitiveState {
+            topology: PrimitiveTopology::TriangleList,
+            ..PrimitiveState::default()
+        },
+        depth_stencil: None,
+        multisample: Default::default(),
+        fragment: Some(FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: PipelineCompilationOptions::default(),
+            targets: &[Some(ColorTargetState {
+                format,
+                blend: None,
+                write_mask: ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    let buffer = device.create_buffer(&BufferDescriptor {
+        label: Some("lunar triangle vertices"),
+        size: 72,
+        usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    (pipeline, buffer)
 }

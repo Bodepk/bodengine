@@ -49,6 +49,10 @@ pub trait PlatformApp {
 
     /// Un frame listo para simular/renderizar. Devuelve `false` para salir.
     fn on_frame(&mut self) -> bool;
+
+    /// Actualiza el render justo antes de presentar el frame (ADR-017).
+    #[cfg(feature = "render")]
+    fn on_render(&mut self, _renderer: &mut lunar_render::Renderer<'_>) {}
 }
 
 /// Traduce una tecla física de winit a una tecla del motor.
@@ -178,10 +182,11 @@ impl<A: PlatformApp> ApplicationHandler for WinitHost<'_, A> {
                     return;
                 }
                 #[cfg(feature = "render")]
-                if let Some(renderer) = &mut self.renderer
-                    && let Err(error) = renderer.render()
-                {
-                    eprintln!("error al presentar el frame: {error}");
+                if let Some(renderer) = &mut self.renderer {
+                    self.app.on_render(renderer);
+                    if let Err(error) = renderer.render() {
+                        eprintln!("error al presentar el frame: {error}");
+                    }
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();
