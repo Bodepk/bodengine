@@ -35,6 +35,8 @@ publish = false
 
 [workspace.dependencies]
 bevy_ecs = "0.20.1"
+cxx = "1.0.205"
+cxx-build = "1.0.205"
 wgpu = "30.0.2"
 winit = "0.30.13"
 lunar_math = { path = "crates/lunar_math" }
