@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H5 completados**. H6 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
+> Estado actual: **H0 a H6 completados**. H7 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
 
 ## Principios
 
@@ -20,7 +20,8 @@ Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `
 | ECS | `bevy_ecs` | 0.20.1 |
 | Render | `wgpu` | 30.0.2 |
 | Física 2D/3D | `rapier2d` / `rapier3d` | 0.36.1 |
-| Carga de assets | `image`, `gltf` | por fijar en H6/H7 |
+| Assets de imagen | `image` | 0.25.10 (solo PNG) |
+| Assets glTF | `gltf` | por fijar en H7 |
 | Audio | `rodio` | por fijar en H8 |
 | FFI C++ | `cxx`, `cxx-build` | 1.0.205 |
 
@@ -39,6 +40,7 @@ crates/
   lunar_render3d    Render 3D (marcador de feature)
   lunar_physics2d   Rapier 2D
   lunar_physics3d   Rapier 3D
+  lunar_assets      Decodificación PNG y handles opacos
   lunar_audio       rodio
   lunar_bridge      Frontera cxx / API C++
   lunar_runtime     Composición de todos los subsistemas
@@ -50,7 +52,7 @@ tests/fixtures     Datos de prueba sin GPU
 
 ## Features
 
-`default` activa todo (`dim2`, `dim3`, `audio`, `bridge`, `runtime`). Los builds parciales:
+`default` activa todo (`dim2`, `dim3`, `assets`, `audio`, `bridge`, `runtime`). Los builds parciales:
 
 ```bash
 cargo build -p lunar --no-default-features --features dim2
@@ -58,9 +60,9 @@ cargo build -p lunar --no-default-features --features dim3
 cargo build -p lunar --no-default-features
 ```
 
-La última variante excluye también `wgpu`: `lunar_platform/render` se activa desde la feature `render` del crate raíz.
+La última variante excluye también `wgpu` y `image`: `lunar_platform/render` se activa desde la feature `render` del crate raíz, y `assets` no la activan `dim2` ni `dim3`.
 
-El workflow de CI verifica con `cargo tree -e features` que el árbol 2D-only no arrastra crates 3D y viceversa.
+El workflow de CI verifica con `cargo tree -e features` que el árbol 2D-only no arrastra crates 3D, que el 3D-only no arrastra crates 2D y que ningún build parcial incluye assets.
 
 ## Comandos
 
@@ -91,7 +93,8 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 | H3 | FFI cxx y ejemplo C++ | ✅ |
 | H4 | Física 2D (`rapier2d`) | ✅ |
 | H5 | Física 3D (`rapier3d`) | ✅ |
-| H6/H7 | Assets de imagen/glTF | ⛔ |
+| H6 | Assets de imagen (`image`, PNG) | ✅ |
+| H7 | Assets glTF | ⛔ |
 | H8 | Audio | ⛔ |
 | H9 | Escenas y serialización | ⛔ |
 | H10 | Editor (crate opcional) | ⛔ aprobación explícita |
