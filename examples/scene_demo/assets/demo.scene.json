@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "name": "Lunar demo",
+  "entities": [
+    {
+      "id": 1,
+      "name": "Nave",
+      "transform": {
+        "translation": [0.15, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": [
+        { "kind": "mesh", "asset": "triangle.glb", "primitive": 0 },
+        { "kind": "image", "asset": "checker.png" },
+        { "kind": "audio", "asset": "beep.wav", "volume": 0.4, "autoplay": true }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Suelo",
+      "parent": 1,
+      "components": [
+        {
+          "kind": "collider2_d",
+          "shape": { "kind": "cuboid", "half_extents": [1.0, 0.25] },
+          "body": "fixed"
+        }
+      ]
+    }
+  ]
+}

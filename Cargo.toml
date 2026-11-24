@@ -26,6 +26,7 @@ members = [
     "crates/lunar_bridge",
     "crates/lunar_runtime",
     "examples/minimal_game",
+    "examples/scene_demo",
 ]
 resolver = "3"
 

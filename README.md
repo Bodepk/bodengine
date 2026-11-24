@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H11 completados**. El motor y sus hitos aprobados están implementados; las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H11 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -43,12 +43,13 @@ crates/
   lunar_physics3d   Rapier 3D
   lunar_assets      Decodificación PNG/JPEG, glTF 2.0 y handles opacos
   lunar_audio       Reproducción WAV con rodio y handles opacos
-   lunar_scenes      Escenas JSON versionadas y validación sin GPU
-   lunar_editor      Núcleo de edición headless: comandos, selección y undo/redo
+  lunar_scenes      Escenas JSON versionadas y validación sin GPU
+  lunar_editor      Núcleo de edición headless: comandos, selección y undo/redo
   lunar_bridge      Frontera cxx / API C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
 examples/cpp_smoke     Smoke C++ de la bridge cxx (CMake)
+examples/scene_demo    Demo jugable: JSON, glTF, PNG, WAV y editor headless
 docs/adr           Decisiones arquitectónicas
 tests/fixtures     Datos de prueba sin GPU
 ```
@@ -74,6 +75,13 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p minimal_game
+cargo run -p scene_demo
+```
+
+La demo abre una ventana 800×600 y consume `examples/scene_demo/assets/demo.scene.json`: lee el glTF, toma el color del PNG, reproduce el WAV con el volumen de la escena y muestra el editor headless. WASD mueve el triángulo, `W` reproduce el sonido, `S` lo detiene, `↑` renombra la entidad, `↓` deshace, `←` rehace y `Esc` cierra. Para regenerar los assets sintéticos:
+
+```bash
+python examples/scene_demo/tools/generate_assets.py
 ```
 
 El smoke de la API pública C++ se construye con CMake; genera la staticlib Rust y
@@ -103,4 +111,4 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 | H10 | Editor headless (`lunar_editor`, comandos y undo/redo) | ✅ |
 | H11 | Pulido multiplataforma (rutas, guardado y gates por SO) | ✅ |
 
-Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md).
+Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).
