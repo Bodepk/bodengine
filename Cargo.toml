@@ -21,6 +21,7 @@ members = [
     "crates/lunar_physics3d",
     "crates/lunar_assets",
     "crates/lunar_audio",
+    "crates/lunar_scenes",
     "crates/lunar_bridge",
     "crates/lunar_runtime",
     "examples/minimal_game",
@@ -43,6 +44,8 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 rapier2d = { version = "0.36.1", default-features = false, features = ["dim2", "f32", "std"] }
 rapier3d = { version = "0.36.1", default-features = false, features = ["dim3", "f32", "std"] }
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "wav"] }
+serde = { version = "1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }
 wgpu = "30.0.2"
 winit = "0.30.13"
 lunar_math = { path = "crates/lunar_math" }
@@ -56,6 +59,7 @@ lunar_physics2d = { path = "crates/lunar_physics2d" }
 lunar_physics3d = { path = "crates/lunar_physics3d" }
 lunar_assets = { path = "crates/lunar_assets" }
 lunar_audio = { path = "crates/lunar_audio" }
+lunar_scenes = { path = "crates/lunar_scenes" }
 lunar_bridge = { path = "crates/lunar_bridge" }
 lunar_runtime = { path = "crates/lunar_runtime" }
 
@@ -71,16 +75,18 @@ lunar_physics2d = { workspace = true, optional = true }
 lunar_physics3d = { workspace = true, optional = true }
 lunar_assets = { workspace = true, optional = true }
 lunar_audio = { workspace = true, optional = true }
+lunar_scenes = { workspace = true, optional = true }
 lunar_bridge = { workspace = true, optional = true }
 lunar_runtime = { workspace = true, optional = true }
 
 [features]
-default = ["dim2", "dim3", "assets", "gltf", "audio", "bridge", "runtime"]
+default = ["dim2", "dim3", "assets", "gltf", "audio", "scenes", "bridge", "runtime"]
 render = ["dep:lunar_render", "lunar_platform/render"]
 dim2 = ["render", "dep:lunar_render2d", "dep:lunar_physics2d"]
 dim3 = ["render", "dep:lunar_render3d", "dep:lunar_physics3d"]
 assets = ["dep:lunar_assets"]
 gltf = ["assets", "lunar_assets/gltf"]
 audio = ["dep:lunar_audio"]
+scenes = ["dep:lunar_scenes"]
 bridge = ["dep:lunar_bridge"]
 runtime = ["dep:lunar_runtime"]

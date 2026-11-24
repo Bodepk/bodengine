@@ -26,3 +26,5 @@ pub use lunar_render2d as render2d;
 pub use lunar_render3d as render3d;
 #[cfg(feature = "runtime")]
 pub use lunar_runtime as runtime;
+#[cfg(feature = "scenes")]
+pub use lunar_scenes as scenes;

@@ -1487,6 +1487,7 @@ dependencies = [
  "lunar_render2d",
  "lunar_render3d",
  "lunar_runtime",
+ "lunar_scenes",
 ]
 
 [[package]]
@@ -1576,6 +1577,14 @@ version = "0.1.0"
 [[package]]
 name = "lunar_runtime"
 version = "0.1.0"
+
+[[package]]
+name = "lunar_scenes"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "mach2"
