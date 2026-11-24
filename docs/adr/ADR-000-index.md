@@ -24,7 +24,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [005](ADR-005-loop.md) | Bucle de paso fijo a 60 Hz | Aceptada |
 | [006](ADR-006-winit.md) | winit 0.30 confinado en `lunar_platform` | Aceptada |
 | [007](ADR-007-editor.md) | Editor como crate opcional | Aceptada |
-| [008](ADR-008-scenes.md) | Formato de escenas | Pendiente de decidir antes de H9 |
+| [008](ADR-008-scenes.md) | Formato de escenas | Aceptada |
 | [009](ADR-009-render.md) | Render `wgpu` y tamaños de surface degenerados | Aceptada |
 | [010](ADR-010-physics2d.md) | Física 2D con `rapier2d` | Aceptada |
 | [011](ADR-011-physics3d.md) | Física 3D con `rapier3d` | Aceptada |

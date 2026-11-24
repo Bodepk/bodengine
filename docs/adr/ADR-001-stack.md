@@ -20,6 +20,7 @@ Versiones fijadas hasta ahora:
 - `image` = 0.25.10 (MSRV 1.88), fijado en H6 (ADR-012) con `default-features = false` y `png`; H7 añade `jpeg` (ADR-013).
 - `gltf` = 1.4.1 (MSRV 1.61), fijado en H7 (ADR-013) con `default-features = false` y `import`, `names`, `guess_mime_type`.
 - `rodio` = 0.23.0 (MSRV 1.87), fijado en H8 (ADR-014) con `default-features = false` y `playback`, `wav`.
+- `serde` = 1.0.229 (feature `derive`) y `serde_json` = 1.0.154, fijados en H9 (ADR-008) y confinados a `lunar_scenes`.
 - `bevy_ecs` = 0.20.1 (MSRV 1.95, edition 2024). Reason: la toolchain instalada es Rust 1.100.0.
 - Toolchain Rust = 1.100.0, edition 2024, resolver 3.
 
