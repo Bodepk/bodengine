@@ -9,7 +9,7 @@ Un editor GUI tiene un ciclo de diseño y unas dependencias muy distintas del n�
 
 ## Decisión
 
-El editor será un crate opcional, fuera del build por defecto, y **H10 permanece bloqueado hasta aprobación explícita del usuario**. No se añaden dependencias GUI (egui, iced, etc.) antes de esa aprobación.
+El editor será un crate opcional, fuera del build por defecto. H10 estuvo bloqueado hasta aprobación explícita; el usuario aprobó todos los hitos restantes el 2026-11-24 y su alcance concreto se define en ADR-015. No se añaden dependencias GUI (egui, iced, etc.) sin un ADR nuevo.
 
 ## Consecuencias
 
