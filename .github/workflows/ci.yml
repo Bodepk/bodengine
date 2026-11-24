@@ -45,3 +45,9 @@ jobs:
           cargo tree -e features -p lunar --no-default-features --features dim3 > tree-3d.txt
           ! grep -q 'lunar_render2d' tree-3d.txt
           ! grep -q 'lunar_physics2d' tree-3d.txt
+      - name: No-default build excludes render and wgpu
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar --no-default-features > tree-bare.txt
+          ! grep -q 'lunar_render' tree-bare.txt
+          ! grep -q 'wgpu' tree-bare.txt
