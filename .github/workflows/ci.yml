@@ -18,6 +18,9 @@ jobs:
         with:
           toolchain: 1.100.0
           components: rustfmt, clippy
+      - name: Install audio system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Clippy (deny warnings)
@@ -56,6 +59,8 @@ jobs:
           ! grep -q 'lunar_assets' tree-2d.txt
           ! grep -q 'gltf v' tree-2d.txt
           ! grep -q 'image v' tree-2d.txt
+          ! grep -q 'rodio' tree-2d.txt
+          ! grep -q 'cpal' tree-2d.txt
       - name: 3D-only tree includes rapier3d and excludes 2D and assets
         shell: bash
         run: |
@@ -67,6 +72,8 @@ jobs:
           ! grep -q 'lunar_assets' tree-3d.txt
           ! grep -q 'gltf v' tree-3d.txt
           ! grep -q 'image v' tree-3d.txt
+          ! grep -q 'rodio' tree-3d.txt
+          ! grep -q 'cpal' tree-3d.txt
       - name: No-default build excludes render, physics and assets
         shell: bash
         run: |
@@ -77,6 +84,8 @@ jobs:
           ! grep -q 'lunar_assets' tree-bare.txt
           ! grep -q 'gltf v' tree-bare.txt
           ! grep -q 'image v' tree-bare.txt
+          ! grep -q 'rodio' tree-bare.txt
+          ! grep -q 'cpal' tree-bare.txt
       - name: Assets-only tree includes image but excludes glTF
         shell: bash
         run: |
@@ -90,3 +99,9 @@ jobs:
           cargo tree -e features -p lunar --no-default-features --features gltf > tree-gltf.txt
           grep -q 'gltf v1.4.1' tree-gltf.txt
           grep -q 'image v' tree-gltf.txt
+      - name: Audio tree includes the pinned player
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar --no-default-features --features audio > tree-audio.txt
+          grep -q 'rodio v0.23.0' tree-audio.txt
+          grep -q 'cpal' tree-audio.txt
