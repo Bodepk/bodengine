@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H8 completados**. H9 a H11 confirmados por el usuario y se ejecutan en orden; ADR-008 se decide antes de H9.
+> Estado actual: **H0 a H9 completados**. H10 y H11 confirmados por el usuario y se ejecutan en orden.
 
 ## Principios
 
@@ -23,6 +23,7 @@ Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `
 | Assets de imagen | `image` | 0.25.10 (PNG y JPEG) |
 | Assets glTF | `gltf` | 1.4.1 |
 | Audio | `rodio` | 0.23.0 (playback + WAV) |
+| Escenas | `serde` / `serde_json` | 1.0.229 / 1.0.154 |
 | FFI C++ | `cxx`, `cxx-build` | 1.0.205 |
 
 Toolchain fijada en `rust-toolchain.toml`: Rust 1.100.0.
@@ -42,6 +43,7 @@ crates/
   lunar_physics3d   Rapier 3D
   lunar_assets      Decodificación PNG/JPEG, glTF 2.0 y handles opacos
   lunar_audio       Reproducción WAV con rodio y handles opacos
+   lunar_scenes      Escenas JSON versionadas y validación sin GPU
   lunar_bridge      Frontera cxx / API C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
@@ -52,7 +54,7 @@ tests/fixtures     Datos de prueba sin GPU
 
 ## Features
 
-`default` activa todo (`dim2`, `dim3`, `assets`, `gltf`, `audio`, `bridge`, `runtime`). `gltf` implica `assets`, pero `assets` no implica `gltf`. Los builds parciales:
+`default` activa todo (`dim2`, `dim3`, `assets`, `gltf`, `audio`, `scenes`, `bridge`, `runtime`). `gltf` implica `assets`, pero `assets` no implica `gltf`. Los builds parciales:
 
 ```bash
 cargo build -p lunar --no-default-features --features dim2
@@ -60,9 +62,9 @@ cargo build -p lunar --no-default-features --features dim3
 cargo build -p lunar --no-default-features
 ```
 
-La última variante excluye también `wgpu`, `image`, `gltf`, `rodio` y `cpal`: `lunar_platform/render` se activa desde la feature `render` del crate raíz, y `assets` no la activan `dim2` ni `dim3`.
+La última variante excluye también `wgpu`, `image`, `gltf`, `rodio`, `cpal` y `serde_json`: `lunar_platform/render` se activa desde la feature `render` del crate raíz, y `assets` no la activan `dim2` ni `dim3`.
 
-El workflow de CI verifica con `cargo tree -e features` que los árboles 2D-only y 3D-only no arrastran crates de la otra dimensión ni assets, que `assets` incluye `image` pero no `gltf`, y que `gltf` incluye el loader fijado en 1.4.1.
+El workflow de CI verifica con `cargo tree -e features` que los árboles 2D-only y 3D-only no arrastran crates de la otra dimensión ni assets, audio o escenas; que `assets` incluye `image` pero no `gltf`; que `gltf` incluye el loader fijado en 1.4.1; y que `scenes` incluye `serde`/`serde_json` sin requerir GPU.
 
 ## Comandos
 
@@ -96,8 +98,8 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 | H6 | Assets de imagen (`image`, PNG) | ✅ |
 | H7 | Assets glTF (`gltf`, mallas, materiales, texturas) | ✅ |
 | H8 | Audio (`rodio`, WAV, reproductor sin dispositivo en tests) | ✅ |
-| H9 | Escenas y serialización | ⛔ |
-| H10 | Editor (crate opcional) | ⛔ aprobación explícita |
+| H9 | Escenas JSON versionadas (`serde`/`serde_json`, jerarquía validada) | ✅ |
+| H10 | Editor (crate opcional) | ⛔ |
 | H11 | Pulido multiplataforma | ⛔ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md).
