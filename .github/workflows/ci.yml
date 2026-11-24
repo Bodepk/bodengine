@@ -24,6 +24,18 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
+      - name: Configure C++ smoke
+        run: cmake -S examples/cpp_smoke -B build/cpp_smoke
+      - name: Build C++ smoke
+        run: cmake --build build/cpp_smoke --config Release
+      - name: Run C++ smoke
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            build/cpp_smoke/Release/cpp_smoke.exe
+          else
+            build/cpp_smoke/cpp_smoke
+          fi
 
   feature-gates:
     name: 2D-only / 3D-only dependency gates
