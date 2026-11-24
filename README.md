@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0, H1 y H2 completados**. H3 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
+> Estado actual: **H0, H1, H2 y H3 completados**. H4 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
 
 ## Principios
 
@@ -22,7 +22,7 @@ Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `
 | Física 2D/3D | `rapier` | por fijar en H4/H5 |
 | Carga de assets | `image`, `gltf` | por fijar en H6/H7 |
 | Audio | `rodio` | por fijar en H8 |
-| FFI C++ | `cxx` | por fijar en H3 |
+| FFI C++ | `cxx`, `cxx-build` | 1.0.205 |
 
 Toolchain fijada en `rust-toolchain.toml`: Rust 1.100.0.
 
@@ -43,6 +43,7 @@ crates/
   lunar_bridge      Frontera cxx / API C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
+examples/cpp_smoke     Smoke C++ de la bridge cxx (CMake)
 docs/adr           Decisiones arquitectónicas
 tests/fixtures     Datos de prueba sin GPU
 ```
@@ -70,6 +71,16 @@ cargo test --workspace
 cargo run -p minimal_game
 ```
 
+El smoke de la API pública C++ se construye con CMake; genera la staticlib Rust y
+localiza el header de `cxx` desde el `OUT_DIR` de Cargo:
+
+```bash
+cmake -S examples/cpp_smoke -B build/cpp_smoke
+cmake --build build/cpp_smoke --config Release
+build/cpp_smoke/Release/cpp_smoke.exe   # Windows
+# build/cpp_smoke/cpp_smoke             # Linux/macOS
+```
+
 ## Hitos
 
 | Hito | Contenido | Estado |
@@ -77,8 +88,8 @@ cargo run -p minimal_game
 | H0 | Workspace, ADR, CI, toolchain | ✅ |
 | H1 | Math, ECS, bucle 60 Hz, winit, smoke | ✅ |
 | H2 | wgpu y resize a 0×0 | ✅ |
-| H3 | FFI cxx y ejemplo C++ | ⛔ requiere confirmación |
-| H4/H5 | Física 2D/3D | ⛔ |
+| H3 | FFI cxx y ejemplo C++ | ✅ |
+| H4/H5 | Física 2D/3D | ⛔ requiere confirmación |
 | H6/H7 | Assets de imagen/glTF | ⛔ |
 | H8 | Audio | ⛔ |
 | H9 | Escenas y serialización | ⛔ |
