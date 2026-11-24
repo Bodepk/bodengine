@@ -54,6 +54,7 @@ jobs:
           ! grep -q 'lunar_render3d' tree-2d.txt
           ! grep -q 'lunar_physics3d' tree-2d.txt
           ! grep -q 'lunar_assets' tree-2d.txt
+          ! grep -q 'gltf v' tree-2d.txt
           ! grep -q 'image v' tree-2d.txt
       - name: 3D-only tree includes rapier3d and excludes 2D and assets
         shell: bash
@@ -64,6 +65,7 @@ jobs:
           ! grep -q 'lunar_render2d' tree-3d.txt
           ! grep -q 'lunar_physics2d' tree-3d.txt
           ! grep -q 'lunar_assets' tree-3d.txt
+          ! grep -q 'gltf v' tree-3d.txt
           ! grep -q 'image v' tree-3d.txt
       - name: No-default build excludes render, physics and assets
         shell: bash
@@ -73,4 +75,18 @@ jobs:
           ! grep -q 'wgpu' tree-bare.txt
           ! grep -q 'rapier' tree-bare.txt
           ! grep -q 'lunar_assets' tree-bare.txt
+          ! grep -q 'gltf v' tree-bare.txt
           ! grep -q 'image v' tree-bare.txt
+      - name: Assets-only tree includes image but excludes glTF
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar --no-default-features --features assets > tree-assets.txt
+          grep -q 'lunar_assets' tree-assets.txt
+          grep -q 'image v' tree-assets.txt
+          ! grep -q 'gltf v' tree-assets.txt
+      - name: glTF tree includes the pinned loader
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar --no-default-features --features gltf > tree-gltf.txt
+          grep -q 'gltf v1.4.1' tree-gltf.txt
+          grep -q 'image v' tree-gltf.txt
