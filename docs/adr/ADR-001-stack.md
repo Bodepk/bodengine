@@ -19,6 +19,7 @@ Versiones fijadas hasta ahora:
 - `rapier2d` y `rapier3d` = 0.36.1 (MSRV 1.86), fijados en H4/H5 (ADR-010, ADR-011).
 - `image` = 0.25.10 (MSRV 1.88), fijado en H6 (ADR-012) con `default-features = false` y `png`; H7 añade `jpeg` (ADR-013).
 - `gltf` = 1.4.1 (MSRV 1.61), fijado en H7 (ADR-013) con `default-features = false` y `import`, `names`, `guess_mime_type`.
+- `rodio` = 0.23.0 (MSRV 1.87), fijado en H8 (ADR-014) con `default-features = false` y `playback`, `wav`.
 - `bevy_ecs` = 0.20.1 (MSRV 1.95, edition 2024). Reason: la toolchain instalada es Rust 1.100.0.
 - Toolchain Rust = 1.100.0, edition 2024, resolver 3.
 
@@ -26,6 +27,6 @@ Cualquier dependencia nueva fuera de esta lista requiere justificación escrita 
 
 ## Consecuencias
 
-- Las versiones de `image`, `gltf` y `rodio` se fijarán en su hito correspondiente, con su MSRV verificado.
+- Las versiones del stack ya están fijadas en su hito correspondiente, con su MSRV verificado.
 - CI ejecuta `cargo tree -e features` para detectar arrastres accidentales de features 2D/3D.
 - No se introduce `tokio`, `async-std` ni frameworks GUI antes de H10.

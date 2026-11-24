@@ -30,6 +30,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [011](ADR-011-physics3d.md) | Física 3D con `rapier3d` | Aceptada |
 | [012](ADR-012-assets-image.md) | Assets de imagen y crate `lunar_assets` | Aceptada |
 | [013](ADR-013-assets-gltf.md) | Assets glTF en `lunar_assets` | Aceptada |
+| [014](ADR-014-audio.md) | Audio con `rodio` y crate `lunar_audio` | Aceptada |
 
 ## Consecuencias
 

@@ -19,6 +19,7 @@ Reglas de dependencia:
 - `lunar_core` no depende de `winit`, `wgpu`, `rapier` ni `rodio`.
 - `lunar_platform` es el único crate que menciona `winit`.
 - `lunar_assets` es el único crate que menciona `image` y `gltf` (ADR-012, ADR-013).
+- `lunar_audio` es el único crate que menciona `rodio` y, por extensión, `cpal` (ADR-014).
 - La capa de render convierte desde `lunar_math`; `lunar_math` nunca convierte hacia librerías externas (ver ADR-003).
 - `lunar_runtime` compone subsistemas; ningún otro crate depende de él.
 - Excepción H1: `lunar_core` tiene `bevy_ecs` solo como *dev-dependency* porque el derive `Component` de bevy genera rutas `bevy_ecs::…`. No se usa en código de producción; la API pública de `lunar_core` sigue pasando solo por `lunar_ecs`.
