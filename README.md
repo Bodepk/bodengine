@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H10 completados**. H11 confirmado por el usuario y se ejecuta a continuación.
+> Estado actual: **H0 a H11 completados**. El motor y sus hitos aprobados están implementados; las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -65,7 +65,7 @@ cargo build -p lunar --no-default-features
 
 La última variante excluye también `wgpu`, `image`, `gltf`, `rodio`, `cpal` y `serde_json`: `lunar_platform/render` se activa desde la feature `render` del crate raíz, y `assets` no la activan `dim2` ni `dim3`.
 
-El workflow de CI verifica con `cargo tree -e features` que los árboles 2D-only y 3D-only no arrastran crates de la otra dimensión ni assets, audio o escenas; que `assets` incluye `image` pero no `gltf`; que `gltf` incluye el loader fijado en 1.4.1; que `scenes` incluye `serde`/`serde_json` sin requerir GPU; y que el editor no aparece salvo con `--features editor`.
+El workflow de CI verifica con `cargo tree -e features` que los árboles 2D-only y 3D-only no arrastran crates de la otra dimensión ni assets, audio o escenas; que `assets` incluye `image` pero no `gltf`; que `gltf` incluye el loader fijado en 1.4.1; que `scenes` incluye `serde`/`serde_json` sin requerir GPU; y que el editor no aparece salvo con `--features editor`. Además compila cada variante parcial y `--all-features` en Linux, Windows y macOS.
 
 ## Comandos
 
@@ -101,6 +101,6 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 | H8 | Audio (`rodio`, WAV, reproductor sin dispositivo en tests) | ✅ |
 | H9 | Escenas JSON versionadas (`serde`/`serde_json`, jerarquía validada) | ✅ |
 | H10 | Editor headless (`lunar_editor`, comandos y undo/redo) | ✅ |
-| H11 | Pulido multiplataforma | ⛔ |
+| H11 | Pulido multiplataforma (rutas, guardado y gates por SO) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md).
