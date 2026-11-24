@@ -45,16 +45,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.100.0
-      - name: 2D-only tree excludes 3D crates
+      - name: 2D-only tree includes rapier2d and excludes 3D crates
         shell: bash
         run: |
           cargo tree -e features -p lunar --no-default-features --features dim2 > tree-2d.txt
+          grep -q 'rapier2d' tree-2d.txt
+          ! grep -q 'rapier3d' tree-2d.txt
           ! grep -q 'lunar_render3d' tree-2d.txt
           ! grep -q 'lunar_physics3d' tree-2d.txt
       - name: 3D-only tree excludes 2D crates
         shell: bash
         run: |
           cargo tree -e features -p lunar --no-default-features --features dim3 > tree-3d.txt
+          ! grep -q 'rapier2d' tree-3d.txt
           ! grep -q 'lunar_render2d' tree-3d.txt
           ! grep -q 'lunar_physics2d' tree-3d.txt
       - name: No-default build excludes render and wgpu
