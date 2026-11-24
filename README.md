@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 completado**, **H1 en curso**. El editor (H10) está bloqueado hasta aprobación explícita.
+> Estado actual: **H0 y H1 completados**. H2 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
 
 ## Principios
 
@@ -72,7 +72,7 @@ cargo run -p minimal_game
 | Hito | Contenido | Estado |
 | --- | --- | --- |
 | H0 | Workspace, ADR, CI, toolchain | ✅ |
-| H1 | Math, ECS, bucle 60 Hz, winit, smoke | 🔄 |
+| H1 | Math, ECS, bucle 60 Hz, winit, smoke | ✅ |
 | H2 | wgpu y resize a 0×0 | ⛔ requiere confirmación |
 | H3 | FFI cxx y ejemplo C++ | ⛔ |
 | H4/H5 | Física 2D/3D | ⛔ |

@@ -9,7 +9,7 @@ Un motor necesita simulación determinista y estable ante tirones de frame. Si e
 
 ## Decisión
 
-- Paso fijo: `1.0 / 60.0` s (~16.67 ms).
+- Paso fijo: `1.0 / 60.0` s (~16.67 ms). Se almacena como `16_666_667 ns` (redondeo hacia arriba) para que 60 frames de un tick produzcan exactamente 60 substeps en los tests.
 - Acumulador con reloj inyectado (`Clock` trait) para poder testearlo sin dormir ni depender del reloj del sistema.
 - `max_substeps = 5`. Si el acumulador supera ese límite, se descarta el exceso y se reporta `dropped_time`.
 - Se expone `alpha = accumulator / fixed_dt` para interpolar render.

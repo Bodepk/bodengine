@@ -34,6 +34,8 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+bevy_ecs = "0.20.1"
+winit = "0.30.13"
 lunar_math = { path = "crates/lunar_math" }
 lunar_ecs = { path = "crates/lunar_ecs" }
 lunar_core = { path = "crates/lunar_core" }
