@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0, H1, H2 y H3 completados**. H4 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
+> Estado actual: **H0, H1, H2, H3 y H4 completados**. H5 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
 
 ## Principios
 
@@ -19,7 +19,7 @@ Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `
 | Ventana y eventos | `winit` | 0.30.13 |
 | ECS | `bevy_ecs` | 0.20.1 |
 | Render | `wgpu` | 30.0.2 |
-| Física 2D/3D | `rapier` | por fijar en H4/H5 |
+| Física 2D/3D | `rapier2d` / `rapier3d` | 0.36.1 / por fijar en H5 |
 | Carga de assets | `image`, `gltf` | por fijar en H6/H7 |
 | Audio | `rodio` | por fijar en H8 |
 | FFI C++ | `cxx`, `cxx-build` | 1.0.205 |
@@ -89,7 +89,8 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 | H1 | Math, ECS, bucle 60 Hz, winit, smoke | ✅ |
 | H2 | wgpu y resize a 0×0 | ✅ |
 | H3 | FFI cxx y ejemplo C++ | ✅ |
-| H4/H5 | Física 2D/3D | ⛔ requiere confirmación |
+| H4 | Física 2D (`rapier2d`) | ✅ |
+| H5 | Física 3D | ⛔ requiere confirmación |
 | H6/H7 | Assets de imagen/glTF | ⛔ |
 | H8 | Audio | ⛔ |
 | H9 | Escenas y serialización | ⛔ |
