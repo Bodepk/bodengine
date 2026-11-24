@@ -32,6 +32,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [013](ADR-013-assets-gltf.md) | Assets glTF en `lunar_assets` | Aceptada |
 | [014](ADR-014-audio.md) | Audio con `rodio` y crate `lunar_audio` | Aceptada |
 | [015](ADR-015-editor.md) | Núcleo de editor H10 | Aceptada |
+| [016](ADR-016-cross-platform.md) | Pulido multiplataforma H11 | Aceptada |
 
 ## Consecuencias
 
