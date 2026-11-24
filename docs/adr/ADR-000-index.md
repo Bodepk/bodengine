@@ -20,7 +20,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [001](ADR-001-stack.md) | Stack tecnológico y restricción de dependencias | Aceptada |
 | [002](ADR-002-workspace.md) | Workspace, features y límites entre crates | Aceptada |
 | [003](ADR-003-math.md) | Tipos matemáticos propios y conversores | Aceptada |
-| [004](ADR-004-ffi.md) | Frontera cxx y firma de `EngineConfig` | Pendiente de validar en H3 |
+| [004](ADR-004-ffi.md) | Frontera cxx y firma de `EngineConfig` | Aceptada |
 | [005](ADR-005-loop.md) | Bucle de paso fijo a 60 Hz | Aceptada |
 | [006](ADR-006-winit.md) | winit 0.30 confinado en `lunar_platform` | Aceptada |
 | [007](ADR-007-editor.md) | Editor como crate opcional | Aceptada |

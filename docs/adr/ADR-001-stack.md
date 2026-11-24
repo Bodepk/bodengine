@@ -15,6 +15,7 @@ Versiones fijadas hasta ahora:
 
 - `winit` = 0.30.13 (MSRV 1.70).
 - `wgpu` = 30.0.2 (MSRV 1.87.0), fijado en H2 (ADR-009).
+- `cxx` y `cxx-build` = 1.0.205 (MSRV 1.88), fijados en H3 (ADR-004).
 - `bevy_ecs` = 0.20.1 (MSRV 1.95, edition 2024). Reason: la toolchain instalada es Rust 1.100.0.
 - Toolchain Rust = 1.100.0, edition 2024, resolver 3.
 
@@ -22,6 +23,6 @@ Cualquier dependencia nueva fuera de esta lista requiere justificación escrita 
 
 ## Consecuencias
 
-- Las versiones de `wgpu`, `rapier`, `image`, `gltf`, `rodio` y `cxx` se fijarán en su hito correspondiente, con su MSRV verificado.
+- Las versiones de `rapier`, `image`, `gltf` y `rodio` se fijarán en su hito correspondiente, con su MSRV verificado.
 - CI ejecuta `cargo tree -e features` para detectar arrastres accidentales de features 2D/3D.
 - No se introduce `tokio`, `async-std` ni frameworks GUI antes de H10.
