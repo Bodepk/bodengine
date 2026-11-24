@@ -22,6 +22,7 @@ members = [
     "crates/lunar_assets",
     "crates/lunar_audio",
     "crates/lunar_scenes",
+    "crates/lunar_editor",
     "crates/lunar_bridge",
     "crates/lunar_runtime",
     "examples/minimal_game",
@@ -60,6 +61,7 @@ lunar_physics3d = { path = "crates/lunar_physics3d" }
 lunar_assets = { path = "crates/lunar_assets" }
 lunar_audio = { path = "crates/lunar_audio" }
 lunar_scenes = { path = "crates/lunar_scenes" }
+lunar_editor = { path = "crates/lunar_editor" }
 lunar_bridge = { path = "crates/lunar_bridge" }
 lunar_runtime = { path = "crates/lunar_runtime" }
 
@@ -76,6 +78,7 @@ lunar_physics3d = { workspace = true, optional = true }
 lunar_assets = { workspace = true, optional = true }
 lunar_audio = { workspace = true, optional = true }
 lunar_scenes = { workspace = true, optional = true }
+lunar_editor = { workspace = true, optional = true }
 lunar_bridge = { workspace = true, optional = true }
 lunar_runtime = { workspace = true, optional = true }
 
@@ -88,5 +91,6 @@ assets = ["dep:lunar_assets"]
 gltf = ["assets", "lunar_assets/gltf"]
 audio = ["dep:lunar_audio"]
 scenes = ["dep:lunar_scenes"]
+editor = ["dep:lunar_editor", "scenes"]
 bridge = ["dep:lunar_bridge"]
 runtime = ["dep:lunar_runtime"]

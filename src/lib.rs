@@ -14,6 +14,8 @@ pub use lunar_assets as assets;
 pub use lunar_audio as audio;
 #[cfg(feature = "bridge")]
 pub use lunar_bridge as bridge;
+#[cfg(feature = "editor")]
+pub use lunar_editor as editor;
 #[cfg(feature = "dim2")]
 pub use lunar_physics2d as physics2d;
 #[cfg(feature = "dim3")]

@@ -1479,6 +1479,7 @@ dependencies = [
  "lunar_bridge",
  "lunar_core",
  "lunar_ecs",
+ "lunar_editor",
  "lunar_math",
  "lunar_physics2d",
  "lunar_physics3d",
@@ -1527,6 +1528,13 @@ name = "lunar_ecs"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+]
+
+[[package]]
+name = "lunar_editor"
+version = "0.1.0"
+dependencies = [
+ "lunar_scenes",
 ]
 
 [[package]]
