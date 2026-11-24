@@ -27,6 +27,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
+      - name: All-features check
+        run: cargo check -p lunar --all-features
       - name: Configure C++ smoke
         run: cmake -S examples/cpp_smoke -B build/cpp_smoke
       - name: Build C++ smoke
@@ -132,3 +134,11 @@ jobs:
           cargo tree -e features -p lunar --no-default-features --features editor > tree-editor.txt
           grep -q 'lunar_editor' tree-editor.txt
           grep -q 'lunar_scenes' tree-editor.txt
+      - name: Partial builds compile
+        shell: bash
+        run: |
+          cargo check -p lunar --no-default-features --features dim2
+          cargo check -p lunar --no-default-features --features dim3
+          cargo check -p lunar --no-default-features
+          cargo check -p lunar --no-default-features --features scenes
+          cargo check -p lunar --no-default-features --features editor
