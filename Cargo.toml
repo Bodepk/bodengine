@@ -19,6 +19,7 @@ members = [
     "crates/lunar_render3d",
     "crates/lunar_physics2d",
     "crates/lunar_physics3d",
+    "crates/lunar_assets",
     "crates/lunar_audio",
     "crates/lunar_bridge",
     "crates/lunar_runtime",
@@ -37,6 +38,7 @@ publish = false
 bevy_ecs = "0.20.1"
 cxx = "1.0.205"
 cxx-build = "1.0.205"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 rapier2d = { version = "0.36.1", default-features = false, features = ["dim2", "f32", "std"] }
 rapier3d = { version = "0.36.1", default-features = false, features = ["dim3", "f32", "std"] }
 wgpu = "30.0.2"
@@ -50,6 +52,7 @@ lunar_render2d = { path = "crates/lunar_render2d" }
 lunar_render3d = { path = "crates/lunar_render3d" }
 lunar_physics2d = { path = "crates/lunar_physics2d" }
 lunar_physics3d = { path = "crates/lunar_physics3d" }
+lunar_assets = { path = "crates/lunar_assets" }
 lunar_audio = { path = "crates/lunar_audio" }
 lunar_bridge = { path = "crates/lunar_bridge" }
 lunar_runtime = { path = "crates/lunar_runtime" }
@@ -64,15 +67,17 @@ lunar_render2d = { workspace = true, optional = true }
 lunar_render3d = { workspace = true, optional = true }
 lunar_physics2d = { workspace = true, optional = true }
 lunar_physics3d = { workspace = true, optional = true }
+lunar_assets = { workspace = true, optional = true }
 lunar_audio = { workspace = true, optional = true }
 lunar_bridge = { workspace = true, optional = true }
 lunar_runtime = { workspace = true, optional = true }
 
 [features]
-default = ["dim2", "dim3", "audio", "bridge", "runtime"]
+default = ["dim2", "dim3", "assets", "audio", "bridge", "runtime"]
 render = ["dep:lunar_render", "lunar_platform/render"]
 dim2 = ["render", "dep:lunar_render2d", "dep:lunar_physics2d"]
 dim3 = ["render", "dep:lunar_render3d", "dep:lunar_physics3d"]
+assets = ["dep:lunar_assets"]
 audio = ["dep:lunar_audio"]
 bridge = ["dep:lunar_bridge"]
 runtime = ["dep:lunar_runtime"]

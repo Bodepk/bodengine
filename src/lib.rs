@@ -8,6 +8,8 @@ pub use lunar_ecs as ecs;
 pub use lunar_math as math;
 pub use lunar_platform as platform;
 
+#[cfg(feature = "assets")]
+pub use lunar_assets as assets;
 #[cfg(feature = "audio")]
 pub use lunar_audio as audio;
 #[cfg(feature = "bridge")]
