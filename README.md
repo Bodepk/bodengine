@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H7 completados**. H8 a H11 confirmados por el usuario y se ejecutan en orden; ADR-008 se decide antes de H9.
+> Estado actual: **H0 a H8 completados**. H9 a H11 confirmados por el usuario y se ejecutan en orden; ADR-008 se decide antes de H9.
 
 ## Principios
 
@@ -22,7 +22,7 @@ Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `
 | Física 2D/3D | `rapier2d` / `rapier3d` | 0.36.1 |
 | Assets de imagen | `image` | 0.25.10 (PNG y JPEG) |
 | Assets glTF | `gltf` | 1.4.1 |
-| Audio | `rodio` | por fijar en H8 |
+| Audio | `rodio` | 0.23.0 (playback + WAV) |
 | FFI C++ | `cxx`, `cxx-build` | 1.0.205 |
 
 Toolchain fijada en `rust-toolchain.toml`: Rust 1.100.0.
@@ -41,7 +41,7 @@ crates/
   lunar_physics2d   Rapier 2D
   lunar_physics3d   Rapier 3D
   lunar_assets      Decodificación PNG/JPEG, glTF 2.0 y handles opacos
-  lunar_audio       rodio
+  lunar_audio       Reproducción WAV con rodio y handles opacos
   lunar_bridge      Frontera cxx / API C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
@@ -60,7 +60,7 @@ cargo build -p lunar --no-default-features --features dim3
 cargo build -p lunar --no-default-features
 ```
 
-La última variante excluye también `wgpu`, `image` y `gltf`: `lunar_platform/render` se activa desde la feature `render` del crate raíz, y `assets` no la activan `dim2` ni `dim3`.
+La última variante excluye también `wgpu`, `image`, `gltf`, `rodio` y `cpal`: `lunar_platform/render` se activa desde la feature `render` del crate raíz, y `assets` no la activan `dim2` ni `dim3`.
 
 El workflow de CI verifica con `cargo tree -e features` que los árboles 2D-only y 3D-only no arrastran crates de la otra dimensión ni assets, que `assets` incluye `image` pero no `gltf`, y que `gltf` incluye el loader fijado en 1.4.1.
 
@@ -95,7 +95,7 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 | H5 | Física 3D (`rapier3d`) | ✅ |
 | H6 | Assets de imagen (`image`, PNG) | ✅ |
 | H7 | Assets glTF (`gltf`, mallas, materiales, texturas) | ✅ |
-| H8 | Audio | ⛔ |
+| H8 | Audio (`rodio`, WAV, reproductor sin dispositivo en tests) | ✅ |
 | H9 | Escenas y serialización | ⛔ |
 | H10 | Editor (crate opcional) | ⛔ aprobación explícita |
 | H11 | Pulido multiplataforma | ⛔ |
