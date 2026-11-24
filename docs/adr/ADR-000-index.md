@@ -25,6 +25,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [006](ADR-006-winit.md) | winit 0.30 confinado en `lunar_platform` | Aceptada |
 | [007](ADR-007-editor.md) | Editor como crate opcional | Aceptada |
 | [008](ADR-008-scenes.md) | Formato de escenas | Pendiente de decidir antes de H9 |
+| [009](ADR-009-render.md) | Render `wgpu` y tamaños de surface degenerados | Aceptada |
 
 ## Consecuencias
 

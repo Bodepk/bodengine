@@ -14,6 +14,7 @@ El stack aprobado es, y se limita a: `winit` (ventana), `wgpu` (render), `rapier
 Versiones fijadas hasta ahora:
 
 - `winit` = 0.30.13 (MSRV 1.70).
+- `wgpu` = 30.0.2 (MSRV 1.87.0), fijado en H2 (ADR-009).
 - `bevy_ecs` = 0.20.1 (MSRV 1.95, edition 2024). Reason: la toolchain instalada es Rust 1.100.0.
 - Toolchain Rust = 1.100.0, edition 2024, resolver 3.
 
