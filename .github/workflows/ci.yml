@@ -63,6 +63,7 @@ jobs:
           ! grep -q 'cpal' tree-2d.txt
           ! grep -q 'lunar_scenes' tree-2d.txt
           ! grep -q 'serde_json' tree-2d.txt
+          ! grep -q 'lunar_editor' tree-2d.txt
       - name: 3D-only tree includes rapier3d and excludes 2D and assets
         shell: bash
         run: |
@@ -78,6 +79,7 @@ jobs:
           ! grep -q 'cpal' tree-3d.txt
           ! grep -q 'lunar_scenes' tree-3d.txt
           ! grep -q 'serde_json' tree-3d.txt
+          ! grep -q 'lunar_editor' tree-3d.txt
       - name: No-default build excludes render, physics and assets
         shell: bash
         run: |
@@ -92,6 +94,7 @@ jobs:
           ! grep -q 'cpal' tree-bare.txt
           ! grep -q 'lunar_scenes' tree-bare.txt
           ! grep -q 'serde_json' tree-bare.txt
+          ! grep -q 'lunar_editor' tree-bare.txt
       - name: Assets-only tree includes image but excludes glTF
         shell: bash
         run: |
@@ -117,3 +120,15 @@ jobs:
           cargo tree -e features -p lunar --no-default-features --features scenes > tree-scenes.txt
           grep -q 'serde v1.0.229' tree-scenes.txt
           grep -q 'serde_json v1.0.154' tree-scenes.txt
+          ! grep -q 'lunar_editor' tree-scenes.txt
+      - name: Default build leaves the editor out
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar > tree-default.txt
+          ! grep -q 'lunar_editor' tree-default.txt
+      - name: Editor tree includes the headless core
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar --no-default-features --features editor > tree-editor.txt
+          grep -q 'lunar_editor' tree-editor.txt
+          grep -q 'lunar_scenes' tree-editor.txt
