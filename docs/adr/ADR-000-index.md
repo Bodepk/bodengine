@@ -28,6 +28,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [009](ADR-009-render.md) | Render `wgpu` y tamaños de surface degenerados | Aceptada |
 | [010](ADR-010-physics2d.md) | Física 2D con `rapier2d` | Aceptada |
 | [011](ADR-011-physics3d.md) | Física 3D con `rapier3d` | Aceptada |
+| [012](ADR-012-assets-image.md) | Assets de imagen y crate `lunar_assets` | Aceptada |
 
 ## Consecuencias
 

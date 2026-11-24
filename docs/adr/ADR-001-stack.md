@@ -17,6 +17,7 @@ Versiones fijadas hasta ahora:
 - `wgpu` = 30.0.2 (MSRV 1.87.0), fijado en H2 (ADR-009).
 - `cxx` y `cxx-build` = 1.0.205 (MSRV 1.88), fijados en H3 (ADR-004).
 - `rapier2d` y `rapier3d` = 0.36.1 (MSRV 1.86), fijados en H4/H5 (ADR-010, ADR-011).
+- `image` = 0.25.10 (MSRV 1.88), fijado en H6 (ADR-012) con `default-features = false` y solo `png`.
 - `bevy_ecs` = 0.20.1 (MSRV 1.95, edition 2024). Reason: la toolchain instalada es Rust 1.100.0.
 - Toolchain Rust = 1.100.0, edition 2024, resolver 3.
 
