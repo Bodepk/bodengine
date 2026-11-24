@@ -1,4 +1,4 @@
-//! Smoke del H1: ventana 800x600, contador de ticks y cierre con ESC.
+//! Smoke del H2: ventana 800x600, render `wgpu`, contador de ticks y ESC.
 
 use lunar::core::{Engine, EngineConfig, Key, SystemClock};
 use lunar::platform::{PlatformApp, WindowConfig, run};
@@ -18,9 +18,8 @@ impl PlatformApp for Smoke {
         }
     }
 
-    fn on_resize(&mut self, width: u32, height: u32) {
-        // H2 conectará aquí el render; en H1 basta con no hacer nada (incluido 0x0).
-        let _ = (width, height);
+    fn on_resize(&mut self, _width: u32, _height: u32) {
+        // La plataforma ya reconfiguró el renderer; 0x0 se omite sin panic.
     }
 
     fn on_frame(&mut self) -> bool {
@@ -36,8 +35,8 @@ impl PlatformApp for Smoke {
 }
 
 fn main() {
-    let window = WindowConfig::new("Lunar H1 smoke", 800, 600);
-    let engine = Engine::new(EngineConfig::new("Lunar H1 smoke", 800, 600));
+    let window = WindowConfig::new("Lunar H2 smoke", 800, 600);
+    let engine = Engine::new(EngineConfig::new("Lunar H2 smoke", 800, 600));
     let mut app = Smoke {
         engine,
         clock: SystemClock::new(),
