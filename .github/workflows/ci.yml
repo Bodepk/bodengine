@@ -61,6 +61,8 @@ jobs:
           ! grep -q 'image v' tree-2d.txt
           ! grep -q 'rodio' tree-2d.txt
           ! grep -q 'cpal' tree-2d.txt
+          ! grep -q 'lunar_scenes' tree-2d.txt
+          ! grep -q 'serde_json' tree-2d.txt
       - name: 3D-only tree includes rapier3d and excludes 2D and assets
         shell: bash
         run: |
@@ -74,6 +76,8 @@ jobs:
           ! grep -q 'image v' tree-3d.txt
           ! grep -q 'rodio' tree-3d.txt
           ! grep -q 'cpal' tree-3d.txt
+          ! grep -q 'lunar_scenes' tree-3d.txt
+          ! grep -q 'serde_json' tree-3d.txt
       - name: No-default build excludes render, physics and assets
         shell: bash
         run: |
@@ -86,6 +90,8 @@ jobs:
           ! grep -q 'image v' tree-bare.txt
           ! grep -q 'rodio' tree-bare.txt
           ! grep -q 'cpal' tree-bare.txt
+          ! grep -q 'lunar_scenes' tree-bare.txt
+          ! grep -q 'serde_json' tree-bare.txt
       - name: Assets-only tree includes image but excludes glTF
         shell: bash
         run: |
@@ -105,3 +111,9 @@ jobs:
           cargo tree -e features -p lunar --no-default-features --features audio > tree-audio.txt
           grep -q 'rodio v0.23.0' tree-audio.txt
           grep -q 'cpal' tree-audio.txt
+      - name: Scenes tree includes the pinned serializers
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar --no-default-features --features scenes > tree-scenes.txt
+          grep -q 'serde v1.0.229' tree-scenes.txt
+          grep -q 'serde_json v1.0.154' tree-scenes.txt
