@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 y H1 completados**. H2 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
+> Estado actual: **H0, H1 y H2 completados**. H3 sigue cerrado hasta confirmación; el editor (H10) está bloqueado hasta aprobación explícita.
 
 ## Principios
 
@@ -18,7 +18,7 @@ Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `
 | --- | --- | --- |
 | Ventana y eventos | `winit` | 0.30.13 |
 | ECS | `bevy_ecs` | 0.20.1 |
-| Render | `wgpu` | por fijar en H2 |
+| Render | `wgpu` | 30.0.2 |
 | Física 2D/3D | `rapier` | por fijar en H4/H5 |
 | Carga de assets | `image`, `gltf` | por fijar en H6/H7 |
 | Audio | `rodio` | por fijar en H8 |
@@ -33,16 +33,16 @@ crates/
   lunar_math        Matemáticas POD, sin dependencias de GPU
   lunar_ecs         Fachada sobre bevy_ecs
   lunar_core        Reloj de paso fijo, input, estado del engine
-  lunar_platform    winit confinado (único crate que lo referencia)
-  lunar_render      Abstracción de render (wgpu en H2)
-  lunar_render2d    Render 2D
-  lunar_render3d    Render 3D
+  lunar_platform    winit confinado; crea la surface nativa de wgpu
+  lunar_render      Render wgpu, viewport y presentación
+  lunar_render2d    Render 2D (marcador de feature)
+  lunar_render3d    Render 3D (marcador de feature)
   lunar_physics2d   Rapier 2D
   lunar_physics3d   Rapier 3D
   lunar_audio       rodio
   lunar_bridge      Frontera cxx / API C++
   lunar_runtime     Composición de todos los subsistemas
-examples/minimal_game  Smoke 800x600 del H1
+examples/minimal_game  Smoke 800x600 con render del H2
 docs/adr           Decisiones arquitectónicas
 tests/fixtures     Datos de prueba sin GPU
 ```
@@ -54,7 +54,10 @@ tests/fixtures     Datos de prueba sin GPU
 ```bash
 cargo build -p lunar --no-default-features --features dim2
 cargo build -p lunar --no-default-features --features dim3
+cargo build -p lunar --no-default-features
 ```
+
+La última variante excluye también `wgpu`: `lunar_platform/render` se activa desde la feature `render` del crate raíz.
 
 El workflow de CI verifica con `cargo tree -e features` que el árbol 2D-only no arrastra crates 3D y viceversa.
 
@@ -73,8 +76,8 @@ cargo run -p minimal_game
 | --- | --- | --- |
 | H0 | Workspace, ADR, CI, toolchain | ✅ |
 | H1 | Math, ECS, bucle 60 Hz, winit, smoke | ✅ |
-| H2 | wgpu y resize a 0×0 | ⛔ requiere confirmación |
-| H3 | FFI cxx y ejemplo C++ | ⛔ |
+| H2 | wgpu y resize a 0×0 | ✅ |
+| H3 | FFI cxx y ejemplo C++ | ⛔ requiere confirmación |
 | H4/H5 | Física 2D/3D | ⛔ |
 | H6/H7 | Assets de imagen/glTF | ⛔ |
 | H8 | Audio | ⛔ |
