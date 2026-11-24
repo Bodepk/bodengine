@@ -224,10 +224,37 @@ impl Scene {
         Self::from_json(&bytes)
     }
 
-    /// Escribe la escena a disco como JSON legible.
+    /// Escribe la escena a disco como JSON legible, creando los directorios que falten.
     pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> Result<(), SceneError> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).map_err(|error| SceneError::Io(error.to_string()))?;
+        }
         let json = self.to_json()?;
         std::fs::write(path, json).map_err(|error| SceneError::Io(error.to_string()))
+    }
+
+    /// Convierte las barras invertidas de las rutas de assets en `/` y valida el resultado.
+    ///
+    /// No cambia la versión del esquema: ADR-008 sigue exigiendo rutas relativas.
+    pub fn normalize_asset_paths(&mut self) -> Result<(), SceneError> {
+        for entity in &mut self.entities {
+            for component in &mut entity.components {
+                match component {
+                    Component::Mesh { asset, .. }
+                    | Component::Image { asset }
+                    | Component::Audio { asset, .. } => {
+                        let normalized = normalize_asset_path(asset);
+                        validate_asset_path(&normalized)?;
+                        *asset = normalized;
+                    }
+                    Component::Collider2D { .. } | Component::Collider3D { .. } => {}
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Comprueba versión, IDs, jerarquía, rutas y volúmenes.
@@ -280,6 +307,12 @@ impl Scene {
         }
         Ok(())
     }
+}
+
+/// Normaliza el separador de una ruta escrita en Windows al formato de ADR-008.
+#[must_use]
+pub fn normalize_asset_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 fn validate_asset_path(path: &str) -> Result<(), SceneError> {
@@ -425,5 +458,56 @@ mod tests {
         assert!(scene.validate().is_ok());
         assert!(scene.entities.is_empty());
         assert_eq!(scene.version, SCENE_VERSION);
+    }
+
+    #[test]
+    fn windows_asset_paths_can_be_normalized() {
+        assert_eq!(normalize_asset_path(r"models\ship.glb"), "models/ship.glb");
+
+        let mut scene = sample_scene();
+        if let Component::Mesh { asset, .. } = &mut scene.entities[0].components[0] {
+            *asset = r"models\ship.glb".to_owned();
+        }
+        assert!(matches!(
+            scene.validate(),
+            Err(SceneError::InvalidAssetPath(_))
+        ));
+
+        scene.normalize_asset_paths().expect("normalize paths");
+        assert_eq!(scene.version, SCENE_VERSION);
+        assert!(scene.validate().is_ok());
+        assert_eq!(
+            scene.entities[0].components[0].asset_path(),
+            Some("models/ship.glb")
+        );
+    }
+
+    #[test]
+    fn normalization_still_rejects_traversal() {
+        let mut scene = sample_scene();
+        if let Component::Mesh { asset, .. } = &mut scene.entities[0].components[0] {
+            *asset = r"..\secret.glb".to_owned();
+        }
+        assert!(matches!(
+            scene.normalize_asset_paths(),
+            Err(SceneError::InvalidAssetPath(_))
+        ));
+    }
+
+    #[test]
+    fn save_creates_missing_parent_directories() {
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let directory =
+            std::env::temp_dir().join(format!("lunar_scene_dir_{}_{counter}", std::process::id()));
+        let path = directory.join("nested").join("scene.json");
+
+        sample_scene().save_to_path(&path).expect("save scene");
+        assert!(path.exists());
+        assert_eq!(
+            Scene::load_from_path(&path).expect("load scene"),
+            sample_scene()
+        );
+
+        std::fs::remove_dir_all(&directory).expect("remove scene directory");
     }
 }
