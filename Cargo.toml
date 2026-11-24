@@ -1,0 +1,71 @@
+[package]
+name = "lunar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Hybrid 2D/3D game engine: Rust core, C++ public API, incremental milestones."
+autoexamples = false
+
+[workspace]
+members = [
+    "crates/lunar_math",
+    "crates/lunar_ecs",
+    "crates/lunar_core",
+    "crates/lunar_platform",
+    "crates/lunar_render",
+    "crates/lunar_render2d",
+    "crates/lunar_render3d",
+    "crates/lunar_physics2d",
+    "crates/lunar_physics3d",
+    "crates/lunar_audio",
+    "crates/lunar_bridge",
+    "crates/lunar_runtime",
+    "examples/minimal_game",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+lunar_math = { path = "crates/lunar_math" }
+lunar_ecs = { path = "crates/lunar_ecs" }
+lunar_core = { path = "crates/lunar_core" }
+lunar_platform = { path = "crates/lunar_platform" }
+lunar_render = { path = "crates/lunar_render" }
+lunar_render2d = { path = "crates/lunar_render2d" }
+lunar_render3d = { path = "crates/lunar_render3d" }
+lunar_physics2d = { path = "crates/lunar_physics2d" }
+lunar_physics3d = { path = "crates/lunar_physics3d" }
+lunar_audio = { path = "crates/lunar_audio" }
+lunar_bridge = { path = "crates/lunar_bridge" }
+lunar_runtime = { path = "crates/lunar_runtime" }
+
+[dependencies]
+lunar_math = { workspace = true }
+lunar_ecs = { workspace = true }
+lunar_core = { workspace = true }
+lunar_platform = { workspace = true }
+lunar_render = { workspace = true, optional = true }
+lunar_render2d = { workspace = true, optional = true }
+lunar_render3d = { workspace = true, optional = true }
+lunar_physics2d = { workspace = true, optional = true }
+lunar_physics3d = { workspace = true, optional = true }
+lunar_audio = { workspace = true, optional = true }
+lunar_bridge = { workspace = true, optional = true }
+lunar_runtime = { workspace = true, optional = true }
+
+[features]
+default = ["dim2", "dim3", "audio", "bridge", "runtime"]
+render = ["dep:lunar_render"]
+dim2 = ["render", "dep:lunar_render2d", "dep:lunar_physics2d"]
+dim3 = ["render", "dep:lunar_render3d", "dep:lunar_physics3d"]
+audio = ["dep:lunar_audio"]
+bridge = ["dep:lunar_bridge"]
+runtime = ["dep:lunar_runtime"]

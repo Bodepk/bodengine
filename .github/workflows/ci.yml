@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    name: fmt + clippy + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.100.0
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+
+  feature-gates:
+    name: 2D-only / 3D-only dependency gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.100.0
+      - name: 2D-only tree excludes 3D crates
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar --no-default-features --features dim2 > tree-2d.txt
+          ! grep -q 'lunar_render3d' tree-2d.txt
+          ! grep -q 'lunar_physics3d' tree-2d.txt
+      - name: 3D-only tree excludes 2D crates
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar --no-default-features --features dim3 > tree-3d.txt
+          ! grep -q 'lunar_render2d' tree-3d.txt
+          ! grep -q 'lunar_physics2d' tree-3d.txt
