@@ -45,7 +45,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.100.0
-      - name: 2D-only tree includes rapier2d and excludes 3D crates
+      - name: 2D-only tree includes rapier2d and excludes 3D and assets
         shell: bash
         run: |
           cargo tree -e features -p lunar --no-default-features --features dim2 > tree-2d.txt
@@ -53,7 +53,9 @@ jobs:
           ! grep -q 'rapier3d' tree-2d.txt
           ! grep -q 'lunar_render3d' tree-2d.txt
           ! grep -q 'lunar_physics3d' tree-2d.txt
-      - name: 3D-only tree includes rapier3d and excludes 2D crates
+          ! grep -q 'lunar_assets' tree-2d.txt
+          ! grep -q 'image v' tree-2d.txt
+      - name: 3D-only tree includes rapier3d and excludes 2D and assets
         shell: bash
         run: |
           cargo tree -e features -p lunar --no-default-features --features dim3 > tree-3d.txt
@@ -61,10 +63,14 @@ jobs:
           ! grep -q 'rapier2d' tree-3d.txt
           ! grep -q 'lunar_render2d' tree-3d.txt
           ! grep -q 'lunar_physics2d' tree-3d.txt
-      - name: No-default build excludes render and physics
+          ! grep -q 'lunar_assets' tree-3d.txt
+          ! grep -q 'image v' tree-3d.txt
+      - name: No-default build excludes render, physics and assets
         shell: bash
         run: |
           cargo tree -e features -p lunar --no-default-features > tree-bare.txt
           ! grep -q 'lunar_render' tree-bare.txt
           ! grep -q 'wgpu' tree-bare.txt
           ! grep -q 'rapier' tree-bare.txt
+          ! grep -q 'lunar_assets' tree-bare.txt
+          ! grep -q 'image v' tree-bare.txt
