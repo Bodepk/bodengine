@@ -23,4 +23,4 @@ H6 necesita cargar imágenes sin crear ventana, dispositivo GPU ni reloj. `image
 - El gate 2D/3D no se altera: `--features dim2`/`dim3` no arrastran `image` porque no activan `assets`.
 - `--no-default-features` excluye `image`; el gate correspondiente se comprueba en CI con `cargo tree -e features`.
 - La representación de handles en escenas (rutas, UUIDs o índices estables) sigue pendiente de ADR-008; H6 no la decide.
-- Cambiar de versión de `image` o añadir formatos no obliga a tocar los otros crates.
+- Cambiar de versión de `image` o añadir formatos no obliga a tocar los otros crates. H7 activa `jpeg` junto a `png` para texturas glTF (ADR-013); WebP sigue sin activarse.
