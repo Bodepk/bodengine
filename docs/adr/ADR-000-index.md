@@ -26,6 +26,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [007](ADR-007-editor.md) | Editor como crate opcional | Aceptada |
 | [008](ADR-008-scenes.md) | Formato de escenas | Pendiente de decidir antes de H9 |
 | [009](ADR-009-render.md) | Render `wgpu` y tamaños de surface degenerados | Aceptada |
+| [010](ADR-010-physics2d.md) | Física 2D con `rapier2d` | Aceptada |
 
 ## Consecuencias
 
