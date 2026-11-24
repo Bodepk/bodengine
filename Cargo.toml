@@ -35,11 +35,12 @@ publish = false
 
 [workspace.dependencies]
 bevy_ecs = "0.20.1"
+wgpu = "30.0.2"
 winit = "0.30.13"
 lunar_math = { path = "crates/lunar_math" }
 lunar_ecs = { path = "crates/lunar_ecs" }
 lunar_core = { path = "crates/lunar_core" }
-lunar_platform = { path = "crates/lunar_platform" }
+lunar_platform = { path = "crates/lunar_platform", default-features = false }
 lunar_render = { path = "crates/lunar_render" }
 lunar_render2d = { path = "crates/lunar_render2d" }
 lunar_render3d = { path = "crates/lunar_render3d" }
@@ -65,7 +66,7 @@ lunar_runtime = { workspace = true, optional = true }
 
 [features]
 default = ["dim2", "dim3", "audio", "bridge", "runtime"]
-render = ["dep:lunar_render"]
+render = ["dep:lunar_render", "lunar_platform/render"]
 dim2 = ["render", "dep:lunar_render2d", "dep:lunar_physics2d"]
 dim3 = ["render", "dep:lunar_render3d", "dep:lunar_physics3d"]
 audio = ["dep:lunar_audio"]
