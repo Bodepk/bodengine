@@ -33,6 +33,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [014](ADR-014-audio.md) | Audio con `rodio` y crate `lunar_audio` | Aceptada |
 | [015](ADR-015-editor.md) | Núcleo de editor H10 | Aceptada |
 | [016](ADR-016-cross-platform.md) | Pulido multiplataforma H11 | Aceptada |
+| [017](ADR-017-demo-render.md) | Gancho de frame y triángulo de demo | Aceptada |
 
 ## Consecuencias
 
