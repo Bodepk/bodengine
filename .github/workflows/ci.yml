@@ -53,6 +53,30 @@ jobs:
           else
             build/cpp_platformer/cpp_platformer --headless
           fi
+      - name: Configure and install C++ SDK
+        shell: bash
+        run: |
+          cmake -S sdk/cpp -B build/cpp_sdk -DCMAKE_INSTALL_PREFIX="$PWD/build/sdk-prefix"
+          cmake --build build/cpp_sdk --config Release
+          cmake --install build/cpp_sdk --config Release
+      - name: Configure and build external C++ SDK template
+        shell: bash
+        run: |
+          cmake -S examples/cpp_sdk_template -B build/cpp_sdk_template \
+            -DCMAKE_PREFIX_PATH="$PWD/build/sdk-prefix"
+          cmake --build build/cpp_sdk_template --config Release
+      - name: Run external C++ SDK template
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            build/cpp_sdk_template/Release/cpp_sdk_template.exe
+          else
+            build/cpp_sdk_template/cpp_sdk_template
+          fi
+      - name: SDK template has no workspace paths
+        shell: bash
+        run: |
+          ! grep -R -E 'LUNAR_ROOT|sdk/cpp|\.\./\.\.' examples/cpp_sdk_template
 
   feature-gates:
     name: 2D-only / 3D-only dependency gates

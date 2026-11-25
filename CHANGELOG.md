@@ -15,6 +15,8 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Comandos `MoveEntity` y `DuplicateEntity` en `lunar_editor`, validados y deshechos como los demás; `Ctrl+D` duplica la selección en la GUI.
 - API C++ de primera clase en `lunar_bridge` (ADR-021): clase abstracta `Game`, bucle de ventana gestionado por Rust, servicios de input, escenas, imágenes, física 2D y viewport, y órdenes de dibujo `SpriteDrawCpp` que Rust convierte en `SpriteDraw`.
 - Ejemplo `examples/cpp_platformer`: el plataformas canónico con toda la lógica de juego en C++ y los mismos assets y escena v1; modo `--headless` para verificación determinista.
+- SDK C++ instalable en `sdk/cpp` (ADR-022): paquete CMake con headers públicos, header generado, staticlib, target importado `lunar::bridge` y versión exacta del workspace.
+- Ejemplo `examples/cpp_sdk_template`: proyecto C++ externo que consume el SDK con `find_package` y verifica el reloj manual sin abrir ventana; CI lo compila y ejecuta en los tres sistemas operativos.
 
 ### Seguridad y compatibilidad
 
@@ -30,6 +32,8 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - `lunar_bridge` no añade features ni dependencias externas; `bridge` y `default` pasan a incluir servicios 2D, mientras `dim2`, `dim3` y el build sin features siguen sin arrastrar la bridge.
 - El plataformas Rust se conserva como banco de pruebas sin `lunar_bridge`; CI verifica por separado el árbol de la bridge y ejecuta el juego C++ en modo headless en Linux, Windows y macOS.
 - Los ejemplos C++ enlazan explícitamente en macOS los frameworks que la staticlib Rust no propaga (`AppKit`, `Metal`, `MetalKit`, `QuartzCore`, `Security`, etc.).
+- El SDK usa `ExactVersion` porque antes de 1.0 cualquier cambio de versión puede romper la ABI C++; la plantilla externa no referencia rutas del workspace y CI lo verifica.
+- El empaquetado no añade gestores de paquetes ni dependencias nuevas: solo CMake 3.20 y Cargo.
 
 ## [0.1.0] — 2026-11-24
 

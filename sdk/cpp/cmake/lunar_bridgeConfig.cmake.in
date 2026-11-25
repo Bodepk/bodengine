@@ -1,0 +1,45 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+set_and_check(LUNAR_BRIDGE_INCLUDE_DIR "@PACKAGE_LUNAR_BRIDGE_INSTALL_INCLUDE_DIR@")
+set_and_check(LUNAR_BRIDGE_LIB_DIR "@PACKAGE_LUNAR_BRIDGE_INSTALL_LIB_DIR@")
+
+if(NOT TARGET lunar::bridge)
+  add_library(lunar::bridge STATIC IMPORTED)
+  set_target_properties(lunar::bridge PROPERTIES
+    IMPORTED_LOCATION
+      "${LUNAR_BRIDGE_LIB_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}lunar_bridge${CMAKE_STATIC_LIBRARY_SUFFIX}"
+    INTERFACE_INCLUDE_DIRECTORIES "${LUNAR_BRIDGE_INCLUDE_DIR}"
+  )
+
+  # Una staticlib Rust no propaga los `#[link]` de sus dependencias (ADR-022).
+  if(WIN32)
+    set_property(TARGET lunar::bridge APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      kernel32 ntdll userenv ws2_32 dbghelp synchronization imm32 uxtheme dwmapi
+    )
+  elseif(APPLE)
+    set_property(TARGET lunar::bridge APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      pthread m objc iconv
+      "-framework AppKit"
+      "-framework ApplicationServices"
+      "-framework Carbon"
+      "-framework CoreFoundation"
+      "-framework CoreGraphics"
+      "-framework Foundation"
+      "-framework IOKit"
+      "-framework Metal"
+      "-framework MetalKit"
+      "-framework QuartzCore"
+      "-framework Security"
+      "-framework SystemConfiguration"
+      "-framework UniformTypeIdentifiers"
+    )
+  else()
+    set_property(TARGET lunar::bridge APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      dl pthread m rt
+    )
+  endif()
+endif()
+
+check_required_components(lunar_bridge)

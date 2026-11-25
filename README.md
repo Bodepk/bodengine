@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H12 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018) y scripting C++ de primera clase con el plataformas portado a C++ (ADR-021). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H13 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021) y un SDK C++ instalable con `find_package` (ADR-022). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -52,6 +52,7 @@ crates/
 examples/minimal_game  Smoke 800x600 con render del H2
 examples/cpp_smoke     Smoke C++ de la bridge cxx (CMake)
 examples/cpp_platformer  Plataformas 2D canónico: lógica en C++, motor en Rust
+examples/cpp_sdk_template  Proyecto C++ externo que consume el SDK instalado
 examples/scene_demo    Demo jugable: JSON, glTF, PNG, WAV y editor headless
 examples/sprite_platformer  Plataformas 2D: sprites, física Rapier y cámara
 docs/adr           Decisiones arquitectónicas
@@ -117,6 +118,20 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 # build/cpp_smoke/cpp_smoke             # Linux/macOS
 ```
 
+El SDK C++ (ADR-022) se instala como un paquete CMake con `lunar::bridge`, headers y la staticlib. Un proyecto externo solo necesita `find_package`; la plantilla `examples/cpp_sdk_template` comprueba el reloj manual sin abrir ventana:
+
+```bash
+cmake -S sdk/cpp -B build/cpp_sdk -DCMAKE_INSTALL_PREFIX="$PWD/build/sdk-prefix"
+cmake --build build/cpp_sdk --config Release
+cmake --install build/cpp_sdk --config Release
+cmake -S examples/cpp_sdk_template -B build/cpp_sdk_template -DCMAKE_PREFIX_PATH="$PWD/build/sdk-prefix"
+cmake --build build/cpp_sdk_template --config Release
+build/cpp_sdk_template/Release/cpp_sdk_template.exe  # Windows
+# build/cpp_sdk_template/cpp_sdk_template            # Linux/macOS
+```
+
+La versión del paquete es `0.1.0` y se solicita con `EXACT`: antes de 1.0, un cambio de versión puede romper la ABI C++. La configuración propaga las librerías del sistema que la staticlib Rust no declara por sí sola.
+
 ## Hitos
 
 | Hito | Contenido | Estado |
@@ -134,5 +149,6 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 | H10 | Editor headless (`lunar_editor`, comandos y undo/redo) | ✅ |
 | H11 | Pulido multiplataforma (rutas, guardado y gates por SO) | ✅ |
 | H12 | Scripting C++ y plataformas portado a C++ (ADR-021) | ✅ |
+| H13 | SDK C++ instalable con `find_package` (ADR-022) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).
