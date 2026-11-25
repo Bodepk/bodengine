@@ -53,12 +53,15 @@ add_custom_target(lunar_bridge_rust ALL
 
 add_executable(cpp_smoke src/main.cpp)
 add_dependencies(cpp_smoke lunar_bridge_rust)
-target_include_directories(cpp_smoke PRIVATE "${LUNAR_BRIDGE_INCLUDE}")
+target_include_directories(cpp_smoke PRIVATE
+  "${LUNAR_BRIDGE_INCLUDE}"
+  "${LUNAR_ROOT}/crates/lunar_bridge/include"
+)
 target_link_libraries(cpp_smoke PRIVATE "${LUNAR_BRIDGE_STATIC}")
 
 if(MSVC)
   target_link_libraries(cpp_smoke PRIVATE
-    kernel32 ntdll userenv ws2_32 dbghelp synchronization
+    kernel32 ntdll userenv ws2_32 dbghelp synchronization imm32 uxtheme dwmapi
   )
 elseif(APPLE)
   target_link_libraries(cpp_smoke PRIVATE pthread m

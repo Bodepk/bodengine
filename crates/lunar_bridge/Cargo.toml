@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+description = "C++ bridge of the Lunar engine"
 build = "build.rs"
 
 [lib]
@@ -13,6 +14,12 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 cxx.workspace = true
 lunar_core.workspace = true
+lunar_math.workspace = true
+lunar_platform = { workspace = true, features = ["render"] }
+lunar_render.workspace = true
+lunar_physics2d.workspace = true
+lunar_assets.workspace = true
+lunar_scenes.workspace = true
 
 [build-dependencies]
 cxx-build.workspace = true

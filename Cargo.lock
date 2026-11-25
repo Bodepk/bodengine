@@ -1906,7 +1906,13 @@ version = "0.1.0"
 dependencies = [
  "cxx",
  "cxx-build",
+ "lunar_assets",
  "lunar_core",
+ "lunar_math",
+ "lunar_physics2d",
+ "lunar_platform",
+ "lunar_render",
+ "lunar_scenes",
 ]
 
 [[package]]
