@@ -39,6 +39,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [020](ADR-020-visual-editor.md) | Editor visual con assets arrastrables | Aceptada |
 | [021](ADR-021-cpp-scripting.md) | Scripting C++ de primera clase | Aceptada |
 | [022](ADR-022-cpp-sdk.md) | SDK C++ distribuible | Aceptada |
+| [023](ADR-023-cpp-mouse-input.md) | Input de ratón y viewport en C++ | Aceptada |
 
 ## Consecuencias
 
