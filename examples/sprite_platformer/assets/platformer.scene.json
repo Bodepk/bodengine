@@ -35,7 +35,7 @@
       "id": 3,
       "name": "Plataforma izquierda",
       "transform": {
-        "translation": [-3.0, -0.75, 0.0],
+        "translation": [-3.0, -1.9, 0.0],
         "rotation": [0.0, 0.0, 0.0, 1.0],
         "scale": [6.0, 1.0, 1.0]
       },
@@ -52,7 +52,7 @@
       "id": 4,
       "name": "Plataforma derecha",
       "transform": {
-        "translation": [3.5, 0.75, 0.0],
+        "translation": [3.5, -0.9, 0.0],
         "rotation": [0.0, 0.0, 0.0, 1.0],
         "scale": [5.0, 1.0, 1.0]
       },
