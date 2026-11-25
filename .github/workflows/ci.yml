@@ -170,6 +170,19 @@ jobs:
           grep -q 'serde_json v1.0.154' tree-scenes.txt
           ! grep -q 'lunar_editor' tree-scenes.txt
           ! grep -q 'lunar_editor_ui' tree-scenes.txt
+          ! grep -q 'wgpu v' tree-scenes.txt
+          ! grep -q 'rodio v' tree-scenes.txt
+          ! grep -q 'rapier' tree-scenes.txt
+      - name: Scene v2 fixtures and explicit v1 migration
+        shell: bash
+        run: |
+          grep -q '"version": 2' examples/scene_demo/assets/sprites.scene.json
+          grep -q '"kind": "sprite"' examples/scene_demo/assets/sprites.scene.json
+          grep -q '"name": "idle"' examples/scene_demo/assets/sprites.scene.json
+          grep -q '"kind": "prefab_ref"' examples/scene_demo/assets/sprites.scene.json
+          grep -q 'pub const SCENE_VERSION: u32 = 2' crates/lunar_scenes/src/lib.rs
+          grep -q 'pub fn upgrade' crates/lunar_scenes/src/lib.rs
+          cargo test -p lunar_scenes
       - name: Default build leaves the editor and GUI out
         shell: bash
         run: |

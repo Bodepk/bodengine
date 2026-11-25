@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "name": "Lunar sprites v2",
+  "prefabs": [
+    {
+      "name": "nave",
+      "entities": [
+        {
+          "id": 1,
+          "name": "Nave",
+          "components": [
+            {
+              "kind": "sprite",
+              "asset": "checker.png",
+              "meta": {
+                "frame_width": 16,
+                "frame_height": 16,
+                "columns": 4,
+                "rows": 2,
+                "fps": 12.0,
+                "looping": true
+              },
+              "animations": [
+                {
+                  "name": "idle",
+                  "frames": [0, 1, 2, 3],
+                  "fps": 8.0,
+                  "looping": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "entities": [
+    { "id": 10, "components": [{ "kind": "prefab_ref", "name": "nave" }] }
+  ]
+}

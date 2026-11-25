@@ -21,6 +21,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Audio desde C++ (ADR-024): `load_sound`, `play_sound`, `stop_sound`, `stop_all_sounds`, `set_volume`, `set_master_volume`, `master_volume` e `is_sound_playing`, con handles opacos y rutas validadas dentro de `assets_dir`.
 - Servicios 3D desde C++ (ADR-025): física `rapier3d`, carga de glTF, extracción de mallas, cámara y órdenes `MeshDrawCpp` validadas por `lunar_render3d`, sin presentación GPU.
 - Documentos de escena desde C++ (ADR-026): guardado, estado de dirty, undo/redo, comandos de entidad y recarga cooperativa por huella del archivo, con `EditorDocument` confinado en Rust.
+- Escenas v2 (ADR-027): `Component::Sprite` con `SpriteMeta`/`AnimationClip`, `prefabs` y `Component::PrefabRef`, conversor explícito `v1::upgrade` y `Scene::instantiate_prefab`; ejemplo `sprites.scene.json`.
 
 ### Seguridad y compatibilidad
 
@@ -42,6 +43,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - H15 solo añade un crate interno (`lunar_audio`) a la bridge: `rodio`, `cpal`, `SoundData` y los handles de `rodio` no cruzan la FFI; sin dispositivo `play_sound` devuelve `0` y los tests no dependen de hardware de audio. Los gates `dim2`, `dim3` y bare siguen sin arrastrar audio o bridge.
 - H16 no expone Rapier, glTF ni `wgpu` por la FFI: los ids son `u64` opacos, `BodyState3DCpp`/`RayHit3DCpp`/`MeshDrawCpp` son POD y `Renderer3D` valida antes de encolar. La conversión glTF→malla vive tras la feature `gltf` de `lunar_render3d`, activada solo por la bridge; `dim3` sigue sin assets. El esquema JSON v1 no cambia.
 - H17 no expone `Editor`, `EditorCommand`, `Scene`, `Renderer` ni `wgpu`: la bridge posee un `EditorDocument` privado y solo cruzan escalares, cadenas y rutas validadas dentro de `assets_dir`. `poll_scene_reload()` nunca sobrescribe un documento sucio. El esquema sigue en v1.
+- H18 eleva el esquema a v2: `Component::Image` no gana campos, las escenas v1 solo se aceptan mediante `v1::upgrade`, y `deny_unknown_fields` impide mezclar campos de v2 en documentos que declaran `"version": 1`. Ningún tipo de animación o prefab cruza la FFI.
 
 ## [0.1.0] — 2026-11-24
 

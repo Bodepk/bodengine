@@ -56,6 +56,9 @@ pub(crate) fn component_label(component: &Component) -> String {
     match component {
         Component::Mesh { asset, primitive } => format!("Malla: {asset} ({primitive:?})"),
         Component::Image { asset } => format!("Imagen: {asset}"),
+        Component::Sprite { asset, meta, .. } => {
+            format!("Sprite: {asset} ({}x{})", meta.columns, meta.rows)
+        }
         Component::Audio {
             asset,
             volume,
@@ -63,6 +66,7 @@ pub(crate) fn component_label(component: &Component) -> String {
         } => format!("Audio: {asset} ({volume:.2}, auto={autoplay})"),
         Component::Collider2D { shape, body } => format!("Col2D: {shape:?} ({body:?})"),
         Component::Collider3D { shape, body } => format!("Col3D: {shape:?} ({body:?})"),
+        Component::PrefabRef { name } => format!("Prefab: {name}"),
     }
 }
 
@@ -169,6 +173,7 @@ mod tests {
         let mut scene = Scene {
             version: SCENE_VERSION,
             name: None,
+            prefabs: Vec::new(),
             entities: vec![entity],
         };
         scene.normalize_asset_paths().expect("normalize paths");

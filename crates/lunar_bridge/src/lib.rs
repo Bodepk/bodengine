@@ -905,7 +905,9 @@ impl Engine {
         };
         for component in &entity.components {
             match component {
-                Component::Image { asset } => info.image_asset = asset.clone(),
+                Component::Image { asset } | Component::Sprite { asset, .. } => {
+                    info.image_asset = asset.clone();
+                }
                 Component::Collider2D { shape, body } => {
                     info.body_kind = match body {
                         BodyType::Dynamic => 1,

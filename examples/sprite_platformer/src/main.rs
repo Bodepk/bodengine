@@ -109,14 +109,7 @@ impl Game {
             if !is_goal && !is_apple {
                 continue;
             }
-            let Some(asset) = entity
-                .components
-                .iter()
-                .find_map(|component| match component {
-                    Component::Image { asset } => Some(asset.as_str()),
-                    _ => None,
-                })
-            else {
+            let Some(asset) = entity.components.iter().find_map(Component::asset_path) else {
                 continue;
             };
             let Some(sprite) = self.sprites.get(asset) else {

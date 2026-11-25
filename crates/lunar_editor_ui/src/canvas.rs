@@ -148,13 +148,7 @@ fn collect_items(app: &EditorApp, rect: Rect, view: View) -> Vec<DrawItem> {
             .get(&entity.id)
             .copied()
             .unwrap_or(entity.transform);
-        let image = entity
-            .components
-            .iter()
-            .find_map(|component| match component {
-                Component::Image { asset } => Some(asset.as_str()),
-                _ => None,
-            });
+        let image = entity.components.iter().find_map(Component::asset_path);
         let (dimensions, texture) = image.map_or(([32, 32], None), |asset| {
             (
                 app.assets.dimensions(asset).unwrap_or([32, 32]),
@@ -530,13 +524,7 @@ fn handle_at(items: &[DrawItem], pointer: Pos2) -> Option<(u64, HandleKind)> {
 fn entity_at(app: &EditorApp, pointer: Pos2, view: View, rect: Rect) -> Option<u64> {
     let world = screen_to_world(pointer, rect, view);
     for entity in app.document.scene().entities.iter().rev() {
-        let image = entity
-            .components
-            .iter()
-            .find_map(|component| match component {
-                Component::Image { asset } => Some(asset.as_str()),
-                _ => None,
-            });
+        let image = entity.components.iter().find_map(Component::asset_path);
         let Some(asset) = image else {
             continue;
         };

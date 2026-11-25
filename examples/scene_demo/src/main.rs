@@ -153,7 +153,7 @@ fn load_scene() -> Result<LoadedDemo, Box<dyn Error>> {
             };
             let path = assets.join(asset);
             match component {
-                Component::Image { .. } => {
+                Component::Image { .. } | Component::Sprite { .. } => {
                     let handle = images.load_from_path(&path)?;
                     let image = images.get(handle).ok_or("imagen no almacenada")?;
                     let pixel = &image.as_rgba()[..4];
@@ -194,7 +194,9 @@ fn load_scene() -> Result<LoadedDemo, Box<dyn Error>> {
                         sound.as_ref().unwrap().len()
                     );
                 }
-                Component::Collider2D { .. } | Component::Collider3D { .. } => {}
+                Component::Collider2D { .. }
+                | Component::Collider3D { .. }
+                | Component::PrefabRef { .. } => {}
             }
         }
     }

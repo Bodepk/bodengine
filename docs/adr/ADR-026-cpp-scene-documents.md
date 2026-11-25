@@ -18,7 +18,7 @@ La bridge C++ puede cargar escenas JSON v1 (`load_scene`) y leer entidades como 
   - `editor_create_entity(id, name)`, `editor_delete_entity(id)`, `editor_rename_entity(id, name)` y `editor_set_transform(id, ...)` pasan por `EditorDocument::apply`; una cadena de nombre vacía significa `None`. Ningún `EditorCommand`, `Scene` ni `Component` cruza la FFI.
   - `reload_scene()` vuelve a leer la ruta conocida y reemplaza el documento, incluso con cambios sin guardar (intención explícita). `poll_scene_reload()` es la recarga en caliente opcional: compara fecha, longitud y un hash FNV-1a del archivo, y solo recarga si cambió y el documento está limpio; no usa hilos ni watchers. El hash evita depender de la granularidad del reloj de archivos.
 - `load_scene(path)` conserva su firma pero crea un `EditorDocument` con historial vacío, aplicando la normalización de rutas previa. Escribir una escena válida sigue siendo responsabilidad de `Scene::save_to_path` bajo el documento.
-- La versión de esquema sigue siendo 1 (ADR-008): no se añaden campos ni se toleran desconocidos. `Editor`, `lunar_editor_ui`, `egui`, `Renderer` y `wgpu` siguen sin aparecer en los headers instalados ni en el árbol de `lunar_bridge`.
+- La versión de esquema sigue siendo 1 en esta ADR (ADR-008): no se añaden campos ni se toleran desconocidos. ADR-027 eleva el esquema canónico a v2 y añade un convertidor explícito para v1; la bridge sigue sin exponer esos tipos. `Editor`, `lunar_editor_ui`, `egui`, `Renderer` y `wgpu` siguen sin aparecer en los headers instalados ni en el árbol de `lunar_bridge`.
 
 ## Consecuencias
 
