@@ -58,6 +58,10 @@ pub enum EditorCommand {
     AddComponent { id: u64, component: Component },
     /// Elimina un componente por índice.
     RemoveComponent { id: u64, index: usize },
+    /// Reordena una entidad dentro del vector de la escena (ADR-020).
+    MoveEntity { id: u64, to: usize },
+    /// Clona una entidad con un identificador nuevo (ADR-020).
+    DuplicateEntity { id: u64, new_id: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -265,6 +269,21 @@ fn mutate(
                 });
             }
             entity.components.remove(*index);
+        }
+        EditorCommand::MoveEntity { id, to } => {
+            let from = position_of(scene, *id)?;
+            let destination = (*to).min(scene.entities.len() - 1);
+            let entity = scene.entities.remove(from);
+            scene.entities.insert(destination, entity);
+        }
+        EditorCommand::DuplicateEntity { id, new_id } => {
+            if scene.entities.iter().any(|entity| entity.id == *new_id) {
+                return Err(SceneError::DuplicateEntity(*new_id).into());
+            }
+            let mut entity = entity_mut(scene, *id)?.clone();
+            entity.id = *new_id;
+            scene.entities.push(entity);
+            *selection = vec![*new_id];
         }
     }
     Ok(())
@@ -508,5 +527,81 @@ mod tests {
         assert_eq!(loaded.scene(), document.scene());
 
         std::fs::remove_file(&path).expect("remove document");
+    }
+
+    #[test]
+    fn move_entity_reorders_and_undo_restores() {
+        let mut document = EditorDocument::new();
+        for id in [1, 2, 3] {
+            document
+                .apply(EditorCommand::CreateEntity { id, name: None })
+                .expect("create entity");
+        }
+        document
+            .apply(EditorCommand::MoveEntity { id: 3, to: 0 })
+            .expect("move 3");
+        let ids: Vec<u64> = document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![3, 1, 2]);
+
+        document
+            .apply(EditorCommand::MoveEntity { id: 3, to: 99 })
+            .expect("clamped move");
+        let ids: Vec<u64> = document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![1, 2, 3]);
+
+        assert!(document.undo());
+        let ids: Vec<u64> = document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![3, 1, 2]);
+    }
+
+    #[test]
+    fn duplicate_entity_copies_data_and_undo_removes_it() {
+        let mut document = EditorDocument::new();
+        document
+            .apply(EditorCommand::CreateEntity {
+                id: 1,
+                name: Some("Original".to_owned()),
+            })
+            .expect("create");
+        document
+            .apply(EditorCommand::AddComponent {
+                id: 1,
+                component: Component::Image {
+                    asset: "sprites/frog.png".to_owned(),
+                },
+            })
+            .expect("add image");
+        document
+            .apply(EditorCommand::DuplicateEntity { id: 1, new_id: 7 })
+            .expect("duplicate");
+
+        assert_eq!(document.scene().entities.len(), 2);
+        assert_eq!(document.selection(), &[7]);
+        let copy = &document.scene().entities[1];
+        assert_eq!(copy.id, 7);
+        assert_eq!(copy.name.as_deref(), Some("Original"));
+        assert_eq!(copy.components, document.scene().entities[0].components);
+
+        assert_eq!(
+            document.apply(EditorCommand::DuplicateEntity { id: 1, new_id: 7 }),
+            Err(SceneError::DuplicateEntity(7).into())
+        );
+        assert!(document.undo());
+        assert_eq!(document.scene().entities.len(), 1);
     }
 }
