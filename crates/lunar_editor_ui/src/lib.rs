@@ -5,7 +5,8 @@
 //! dispositivos GPU propios ni expone `wgpu` en su API.
 
 mod app;
-mod graph;
+mod assets;
+mod canvas;
 mod helpers;
 mod hierarchy;
 mod inspector;
@@ -27,6 +28,11 @@ pub fn run() -> eframe::Result<()> {
     eframe::run_native(
         "lunar_editor_ui",
         options,
-        Box::new(move |_cc| Ok(Box::new(app::EditorApp::new(scene_path.clone())))),
+        Box::new(move |cc| {
+            Ok(Box::new(app::EditorApp::new(
+                scene_path.clone(),
+                &cc.egui_ctx,
+            )))
+        }),
     )
 }

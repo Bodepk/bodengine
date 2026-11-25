@@ -1937,6 +1937,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "lunar_assets",
  "lunar_editor",
  "lunar_scenes",
 ]

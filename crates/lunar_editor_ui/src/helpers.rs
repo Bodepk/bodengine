@@ -82,6 +82,56 @@ pub(crate) fn drag_array<const N: usize>(
     changed
 }
 
+/// Píxeles de sprite por unidad de mundo, coherente con ADR-018.
+pub(crate) const PIXELS_PER_UNIT: f32 = 32.0;
+
+/// Paso de la rejilla y del snap, en unidades de mundo.
+pub(crate) const GRID_STEP: f32 = 0.25;
+
+/// Ángulo 2D en radianes de un cuaternión `(x, y, z, w)`.
+#[must_use]
+pub(crate) fn angle_from_quaternion(rotation: [f32; 4]) -> f32 {
+    2.0 * rotation[2].atan2(rotation[3])
+}
+
+/// Cuaternión 2D canónico para un ángulo en radianes.
+#[must_use]
+pub(crate) fn quaternion_from_angle(angle: f32) -> [f32; 4] {
+    let half = angle * 0.5;
+    [0.0, 0.0, half.sin(), half.cos()]
+}
+
+/// Tamaño en unidades de mundo de una imagen con su escala de entidad.
+#[must_use]
+pub(crate) fn image_world_size(dimensions: [u32; 2], scale: [f32; 3]) -> [f32; 2] {
+    [
+        dimensions[0] as f32 / PIXELS_PER_UNIT * scale[0].abs(),
+        dimensions[1] as f32 / PIXELS_PER_UNIT * scale[1].abs(),
+    ]
+}
+
+/// Comprueba si un punto del mundo cae en un rectángulo rotado.
+#[must_use]
+pub(crate) fn contains_point(
+    center: [f32; 2],
+    half_size: [f32; 2],
+    angle: f32,
+    point: [f32; 2],
+) -> bool {
+    let dx = point[0] - center[0];
+    let dy = point[1] - center[1];
+    let (sine, cosine) = angle.sin_cos();
+    let local_x = dx * cosine + dy * sine;
+    let local_y = -dx * sine + dy * cosine;
+    local_x.abs() <= half_size[0] && local_y.abs() <= half_size[1]
+}
+
+/// Redondea al paso de rejilla más cercano.
+#[must_use]
+pub(crate) fn snap_to_grid(value: f32) -> f32 {
+    (value / GRID_STEP).round() * GRID_STEP
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +177,37 @@ mod tests {
             component_label(&scene.entities[0].components[0]),
             "Imagen: assets/sprite.png"
         );
+    }
+
+    #[test]
+    fn angle_round_trip_uses_z_axis() {
+        for angle in [0.0, 0.7, -1.3, std::f32::consts::FRAC_PI_2] {
+            let rotation = quaternion_from_angle(angle);
+            assert!((angle_from_quaternion(rotation) - angle).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn image_size_uses_pixels_per_unit_and_scale() {
+        assert_eq!(image_world_size([32, 64], [2.0, 0.5, 1.0]), [2.0, 1.0]);
+        assert_eq!(image_world_size([32, 32], [-1.0, -1.0, 1.0]), [1.0, 1.0]);
+    }
+
+    #[test]
+    fn hit_test_respects_rotation() {
+        assert!(contains_point([0.0, 0.0], [1.0, 0.25], 0.0, [0.9, 0.1]));
+        assert!(!contains_point([0.0, 0.0], [1.0, 0.25], 0.0, [0.1, 0.9]));
+        assert!(contains_point(
+            [0.0, 0.0],
+            [1.0, 0.25],
+            std::f32::consts::FRAC_PI_2,
+            [0.1, 0.9]
+        ));
+    }
+
+    #[test]
+    fn snap_uses_quarter_unit_step() {
+        assert_eq!(snap_to_grid(1.13), 1.25);
+        assert_eq!(snap_to_grid(-0.12), 0.0);
     }
 }
