@@ -70,6 +70,8 @@ elseif(APPLE)
   # debe nombrar los frameworks que usan winit, wgpu y security-framework.
   target_link_libraries(cpp_platformer PRIVATE pthread m objc iconv
     "-framework AppKit"
+    "-framework ApplicationServices"
+    "-framework Carbon"
     "-framework CoreFoundation"
     "-framework CoreGraphics"
     "-framework Foundation"
