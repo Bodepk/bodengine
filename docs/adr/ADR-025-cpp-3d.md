@@ -18,6 +18,7 @@ ADR-009 confina `wgpu` al render, ADR-021 prohíbe que `Renderer`, `wgpu`, `Imag
   - `MeshDraw` POD de Rust con `mesh: u64`, `model: [f32; 16]` (columna mayor) y `color: [f32; 4]`.
   - `Renderer3D` con cámara `view_projection`, `submit(&[MeshDraw]) -> bool` y `begin_frame()`; rechaza handles desconocidos, matrices no finitas y colores no finitos antes de encolar nada.
   - No aparece `wgpu` en este crate: `lunar_render3d` produce órdenes validadas, no una pass GPU. La presentación 3D en pantalla requiere una decisión posterior y no forma parte de este hito.
+  - La conversión `from_gltf` y `load_gltf` están tras una feature `gltf` opcional de `lunar_render3d`, activada solo por `lunar_bridge`; así `dim3` sigue sin arrastrar `lunar_assets`, `gltf` ni `image`.
 - La bridge expone servicios 3D nuevos, sin cambiar struct ni método existente:
   - Física: `set_gravity3d`, `add_body3d`, `add_collider3d`, `body_state3d`, `apply_impulse3d`, `cast_ray3d` y `step_physics3d`, con los mismos ids públicos `u64` y flags `valid`/`hit` que la API 2D.
   - Assets y mallas: `load_gltf(asset) -> u64`, `define_mesh(gltf, mesh, primitive) -> u64` y `mesh_vertex_count(mesh)`.

@@ -18,8 +18,10 @@ lunar_math.workspace = true
 lunar_platform = { workspace = true, features = ["render"] }
 lunar_render.workspace = true
 lunar_physics2d.workspace = true
-lunar_assets.workspace = true
+lunar_assets = { workspace = true, features = ["gltf"] }
 lunar_audio.workspace = true
+lunar_physics3d.workspace = true
+lunar_render3d = { workspace = true, features = ["gltf"] }
 lunar_scenes.workspace = true
 
 [build-dependencies]

@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <iostream>
 #include <utility>
+#include <vector>
 
 #include <lunar_bridge/src/lib.rs.h>
 
@@ -15,6 +16,33 @@ int main() {
     if (std::string(engine->title()) != "Lunar H3 smoke" ||
         engine->width() != 800 || engine->height() != 600) {
         std::cerr << "la configuración compartida no llegó al motor\n";
+        return 1;
+    }
+
+    // Servicios 3D sin assets: física, cámara y validación de órdenes.
+    engine->set_gravity3d(0.0f, 0.0f, 0.0f);
+    const std::uint64_t body = engine->add_body3d(2, 0.0f, 0.0f, 0.0f);
+    const std::uint64_t collider = engine->add_collider3d(body, 2, 1.0f, 1.0f, 1.0f);
+    if (body == 0 || collider == 0 || !engine->step_physics3d(1.0f / 60.0f) ||
+        !engine->body_state3d(body).valid || !engine->apply_impulse3d(body, 1.0f, 0.0f, 0.0f)) {
+        std::cerr << "la física 3D desde C++ falló\n";
+        return 1;
+    }
+    const RayHit3DCpp hit = engine->cast_ray3d(
+        0.0f, 5.0f, 0.0f, 0.0f, -1.0f, 0.0f, 10.0f);
+    if (!hit.hit || hit.collider != collider) {
+        std::cerr << "el raycast 3D desde C++ falló\n";
+        return 1;
+    }
+    if (!engine->set_camera3d(0.0f, 0.0f, 3.0f, 0.0f, 0.0f, 0.0f,
+                              0.0f, 1.0f, 0.0f, 1.0f, 1.5f, 0.1f, 10.0f)) {
+        std::cerr << "la cámara 3D desde C++ falló\n";
+        return 1;
+    }
+    const std::vector<MeshDrawCpp> invalid_draws{
+        MeshDrawCpp{999, engine->view_projection3d().values, {1.0f, 1.0f, 1.0f, 1.0f}}};
+    if (engine->submit_mesh_draws(rust::Slice<const MeshDrawCpp>(invalid_draws))) {
+        std::cerr << "una orden 3D con handle inválido fue aceptada\n";
         return 1;
     }
 

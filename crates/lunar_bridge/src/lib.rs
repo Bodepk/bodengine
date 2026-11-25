@@ -10,18 +10,26 @@ use std::pin::Pin;
 
 use std::time::Duration;
 
-use lunar_assets::{ImageHandle, ImageStore};
+use lunar_assets::{
+    ImageHandle, ImageStore,
+    gltf::{GltfHandle, GltfStore},
+};
 use lunar_audio::{AudioHandle, AudioPlayer, AudioStore, SoundHandle};
 use lunar_core::{
     Engine as CoreEngine, EngineConfig as CoreEngineConfig, InputState, Key, ManualClock,
     SystemClock, Tick,
 };
-use lunar_math::Vec2;
+use lunar_math::{Vec2, Vec3};
 use lunar_physics2d::{
     BodyDesc2D, BodyId, BodyType2D, ColliderDesc2D, ColliderId, PhysicsWorld2D, Shape2D,
 };
+use lunar_physics3d::{
+    BodyDesc3D, BodyId as BodyId3D, BodyType3D, ColliderDesc3D, ColliderId as ColliderId3D,
+    PhysicsWorld3D, Shape3D as PhysicsShape3D,
+};
 use lunar_platform::{PlatformApp, WindowConfig};
 use lunar_render::{Renderer, SpriteDraw as RenderSpriteDraw, SpriteId};
+use lunar_render3d::{MeshDraw, MeshId, Renderer3D};
 
 use lunar_scenes::{BodyType, Component, Scene, Shape2D as SceneShape2D};
 
@@ -35,15 +43,25 @@ pub struct Engine {
     mouse_snapshot: MouseSnapshot,
     last_tick: Tick,
     physics: PhysicsWorld2D,
+    physics3d: PhysicsWorld3D,
     bodies: HashMap<u64, BodyId>,
     colliders: HashMap<u64, ColliderId>,
     collider_ids: HashMap<ColliderId, u64>,
     next_body: u64,
     next_collider: u64,
+    bodies3d: HashMap<u64, BodyId3D>,
+    colliders3d: HashMap<u64, ColliderId3D>,
+    collider_ids3d: HashMap<ColliderId3D, u64>,
+    next_body3d: u64,
+    next_collider3d: u64,
     assets_dir: PathBuf,
     images: ImageStore,
     image_ids: HashMap<u64, ImageHandle>,
     next_image: u64,
+    gltfs: GltfStore,
+    gltf_ids: HashMap<u64, GltfHandle>,
+    next_gltf: u64,
+    render3d: Renderer3D,
     sounds: AudioStore,
     sound_ids: HashMap<u64, SoundHandle>,
     next_sound: u64,
@@ -441,6 +459,234 @@ impl Engine {
         self.physics.step(dt).is_ok()
     }
 
+    fn set_gravity3d(&mut self, x: f32, y: f32, z: f32) {
+        if x.is_finite() && y.is_finite() && z.is_finite() {
+            self.physics3d.set_gravity(Vec3::new(x, y, z));
+        }
+    }
+
+    fn add_body3d(&mut self, kind: u8, x: f32, y: f32, z: f32) -> u64 {
+        let body_type = match kind {
+            1 => BodyType3D::Dynamic,
+            2 => BodyType3D::Fixed,
+            3 => BodyType3D::KinematicPositionBased,
+            _ => return 0,
+        };
+        if ![x, y, z].iter().all(|value| value.is_finite()) {
+            return 0;
+        }
+        let Some(id) = self
+            .physics3d
+            .add_body(BodyDesc3D::new(body_type, Vec3::new(x, y, z)))
+        else {
+            return 0;
+        };
+        let public_id = self.next_body3d;
+        self.next_body3d += 1;
+        self.bodies3d.insert(public_id, id);
+        public_id
+    }
+
+    fn add_collider3d(
+        &mut self,
+        body: u64,
+        shape: u8,
+        half_x: f32,
+        half_y: f32,
+        half_z: f32,
+    ) -> u64 {
+        let Some(body_id) = self.bodies3d.get(&body).copied() else {
+            return 0;
+        };
+        let shape = match shape {
+            1 => PhysicsShape3D::Ball {
+                radius: half_x.max(0.0),
+            },
+            2 => PhysicsShape3D::Cuboid {
+                half_extents: Vec3::new(half_x.max(0.0), half_y.max(0.0), half_z.max(0.0)),
+            },
+            3 => PhysicsShape3D::Capsule {
+                half_height: half_x.max(0.0),
+                radius: half_y.max(0.0),
+            },
+            _ => return 0,
+        };
+        if !half_x.is_finite() || !half_y.is_finite() || !half_z.is_finite() {
+            return 0;
+        }
+        let Some(id) = self
+            .physics3d
+            .add_collider(body_id, ColliderDesc3D::new(shape))
+        else {
+            return 0;
+        };
+        let public_id = self.next_collider3d;
+        self.next_collider3d += 1;
+        self.colliders3d.insert(public_id, id);
+        self.collider_ids3d.insert(id, public_id);
+        public_id
+    }
+
+    fn body_state3d(&self, body: u64) -> ffi::BodyState3DCpp {
+        let Some(id) = self.bodies3d.get(&body).copied() else {
+            return ffi::BodyState3DCpp::default();
+        };
+        let Some(state) = self.physics3d.body_state(id) else {
+            return ffi::BodyState3DCpp::default();
+        };
+        ffi::BodyState3DCpp {
+            valid: true,
+            x: state.position.x,
+            y: state.position.y,
+            z: state.position.z,
+            qx: state.rotation.x,
+            qy: state.rotation.y,
+            qz: state.rotation.z,
+            qw: state.rotation.w,
+            vx: state.linvel.x,
+            vy: state.linvel.y,
+            vz: state.linvel.z,
+        }
+    }
+
+    fn apply_impulse3d(&mut self, body: u64, x: f32, y: f32, z: f32) -> bool {
+        let Some(id) = self.bodies3d.get(&body).copied() else {
+            return false;
+        };
+        self.physics3d.apply_impulse(id, Vec3::new(x, y, z))
+    }
+
+    #[allow(clippy::too_many_arguments)] // origen, dirección y distancia como escalares POD
+    fn cast_ray3d(
+        &self,
+        origin_x: f32,
+        origin_y: f32,
+        origin_z: f32,
+        direction_x: f32,
+        direction_y: f32,
+        direction_z: f32,
+        max_toi: f32,
+    ) -> ffi::RayHit3DCpp {
+        let Some(hit) = self.physics3d.cast_ray(
+            Vec3::new(origin_x, origin_y, origin_z),
+            Vec3::new(direction_x, direction_y, direction_z),
+            max_toi,
+        ) else {
+            return ffi::RayHit3DCpp::default();
+        };
+        ffi::RayHit3DCpp {
+            hit: true,
+            collider: self.collider_ids3d.get(&hit.collider).copied().unwrap_or(0),
+            toi: hit.toi,
+        }
+    }
+
+    fn step_physics3d(&mut self, dt: f32) -> bool {
+        self.physics3d.step(dt).is_ok()
+    }
+
+    fn load_gltf(&mut self, asset: &str) -> u64 {
+        let Some(path) = safe_asset_path(&self.assets_dir, asset) else {
+            return 0;
+        };
+        let Ok(handle) = self.gltfs.load_from_path(path) else {
+            return 0;
+        };
+        let public_id = self.next_gltf;
+        self.next_gltf += 1;
+        self.gltf_ids.insert(public_id, handle);
+        public_id
+    }
+
+    fn define_mesh(&mut self, gltf: u64, mesh: u32, primitive: u32) -> u64 {
+        let Some(handle) = self.gltf_ids.get(&gltf).copied() else {
+            return 0;
+        };
+        let Some(document) = self.gltfs.get(handle) else {
+            return 0;
+        };
+        let Ok(id) = self
+            .render3d
+            .from_gltf(document, mesh as usize, primitive as usize)
+        else {
+            return 0;
+        };
+        id.get()
+    }
+
+    fn mesh_vertex_count(&self, mesh: u64) -> u32 {
+        self.render3d
+            .vertex_count(MeshId::from_u64(mesh))
+            .unwrap_or_default() as u32
+    }
+
+    fn mesh_index_count(&self, mesh: u64) -> u32 {
+        self.render3d
+            .index_count(MeshId::from_u64(mesh))
+            .unwrap_or_default() as u32
+    }
+
+    #[allow(clippy::too_many_arguments)] // parámetros vectoriales explícitos para la ABI C++
+    fn set_camera3d(
+        &mut self,
+        eye_x: f32,
+        eye_y: f32,
+        eye_z: f32,
+        target_x: f32,
+        target_y: f32,
+        target_z: f32,
+        up_x: f32,
+        up_y: f32,
+        up_z: f32,
+        fov: f32,
+        aspect: f32,
+        near: f32,
+        far: f32,
+    ) -> bool {
+        self.render3d.set_camera(
+            [eye_x, eye_y, eye_z],
+            [target_x, target_y, target_z],
+            [up_x, up_y, up_z],
+            fov,
+            aspect,
+            near,
+            far,
+        )
+    }
+
+    fn view_projection3d(&self) -> ffi::Mat4Cpp {
+        ffi::Mat4Cpp {
+            values: self.render3d.view_projection(),
+        }
+    }
+
+    fn submit_mesh_draws(&mut self, draws: &[ffi::MeshDrawCpp]) -> bool {
+        let pending: Vec<MeshDraw> = draws
+            .iter()
+            .map(|draw| MeshDraw {
+                mesh: draw.mesh,
+                model: draw.model,
+                color: draw.color,
+            })
+            .collect();
+        self.render3d.submit(&pending)
+    }
+
+    fn mesh_draw_count(&self) -> u32 {
+        self.render3d.draws().len() as u32
+    }
+
+    fn mesh_draw(&self, index: u32) -> ffi::MeshDrawCpp {
+        let Some(draw) = self.render3d.draws().get(index as usize) else {
+            return ffi::MeshDrawCpp::default();
+        };
+        ffi::MeshDrawCpp {
+            mesh: draw.mesh,
+            model: draw.model,
+            color: draw.color,
+        }
+    }
+
     fn load_scene(&mut self, path: &str) -> bool {
         let Some(path) = safe_asset_path(&self.assets_dir, path) else {
             return false;
@@ -629,6 +875,7 @@ impl Engine {
     fn begin_render(&mut self) {
         self.draws.clear();
         self.invalid_draw = false;
+        self.render3d.begin_frame();
     }
 
     /// Sube las texturas pendientes y presenta la lista acumulada del frame.
@@ -714,15 +961,25 @@ fn new_with_config(config: CoreEngineConfig, assets_dir: PathBuf) -> Box<Engine>
         mouse_snapshot: MouseSnapshot::default(),
         last_tick: empty_tick(),
         physics: PhysicsWorld2D::new(Vec2::new(0.0, -9.81)),
+        physics3d: PhysicsWorld3D::new(Vec3::new(0.0, -9.81, 0.0)),
         bodies: HashMap::new(),
         colliders: HashMap::new(),
         collider_ids: HashMap::new(),
         next_body: 1,
         next_collider: 1,
+        bodies3d: HashMap::new(),
+        colliders3d: HashMap::new(),
+        collider_ids3d: HashMap::new(),
+        next_body3d: 1,
+        next_collider3d: 1,
         assets_dir,
         images: ImageStore::new(),
         image_ids: HashMap::new(),
         next_image: 1,
+        gltfs: GltfStore::new(),
+        gltf_ids: HashMap::new(),
+        next_gltf: 1,
+        render3d: Renderer3D::new(),
         sounds: AudioStore::new(),
         sound_ids: HashMap::new(),
         next_sound: 1,
@@ -895,6 +1152,44 @@ mod ffi {
         toi: f32,
     }
 
+    /// Estado de un cuerpo 3D: posición, rotación `(x, y, z, w)` y velocidad.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct BodyState3DCpp {
+        valid: bool,
+        x: f32,
+        y: f32,
+        z: f32,
+        qx: f32,
+        qy: f32,
+        qz: f32,
+        qw: f32,
+        vx: f32,
+        vy: f32,
+        vz: f32,
+    }
+
+    /// Resultado de un raycast 3D; `collider` es el id público de la bridge.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct RayHit3DCpp {
+        hit: bool,
+        collider: u64,
+        toi: f32,
+    }
+
+    /// Matriz 4×4 en columna mayor, como array plano de 16 escalares.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct Mat4Cpp {
+        values: [f32; 16],
+    }
+
+    /// Orden de dibujo 3D; `mesh` es un handle de esta bridge.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct MeshDrawCpp {
+        mesh: u64,
+        model: [f32; 16],
+        color: [f32; 4],
+    }
+
     /// Orden de dibujo en NDC; `sprite` es un handle de esta bridge.
     #[derive(Debug, Default, Clone, Copy, PartialEq)]
     struct SpriteDrawCpp {
@@ -967,6 +1262,57 @@ mod ffi {
         ) -> RayHit;
         fn step_physics(self: &mut Engine, dt: f32) -> bool;
 
+        fn set_gravity3d(self: &mut Engine, x: f32, y: f32, z: f32);
+        fn add_body3d(self: &mut Engine, kind: u8, x: f32, y: f32, z: f32) -> u64;
+        fn add_collider3d(
+            self: &mut Engine,
+            body: u64,
+            shape: u8,
+            half_x: f32,
+            half_y: f32,
+            half_z: f32,
+        ) -> u64;
+        fn body_state3d(self: &Engine, body: u64) -> BodyState3DCpp;
+        fn apply_impulse3d(self: &mut Engine, body: u64, x: f32, y: f32, z: f32) -> bool;
+        #[allow(clippy::too_many_arguments)]
+        fn cast_ray3d(
+            self: &Engine,
+            origin_x: f32,
+            origin_y: f32,
+            origin_z: f32,
+            direction_x: f32,
+            direction_y: f32,
+            direction_z: f32,
+            max_toi: f32,
+        ) -> RayHit3DCpp;
+        fn step_physics3d(self: &mut Engine, dt: f32) -> bool;
+
+        fn load_gltf(self: &mut Engine, asset: &str) -> u64;
+        fn define_mesh(self: &mut Engine, gltf: u64, mesh: u32, primitive: u32) -> u64;
+        fn mesh_vertex_count(self: &Engine, mesh: u64) -> u32;
+        fn mesh_index_count(self: &Engine, mesh: u64) -> u32;
+        #[allow(clippy::too_many_arguments)]
+        fn set_camera3d(
+            self: &mut Engine,
+            eye_x: f32,
+            eye_y: f32,
+            eye_z: f32,
+            target_x: f32,
+            target_y: f32,
+            target_z: f32,
+            up_x: f32,
+            up_y: f32,
+            up_z: f32,
+            fov: f32,
+            aspect: f32,
+            near: f32,
+            far: f32,
+        ) -> bool;
+        fn view_projection3d(self: &Engine) -> Mat4Cpp;
+        fn submit_mesh_draws(self: &mut Engine, draws: &[MeshDrawCpp]) -> bool;
+        fn mesh_draw_count(self: &Engine) -> u32;
+        fn mesh_draw(self: &Engine, index: u32) -> MeshDrawCpp;
+
         fn load_scene(self: &mut Engine, path: &str) -> bool;
         fn entity_count(self: &Engine) -> u32;
         fn entity(self: &Engine, index: u32) -> EntityInfo;
@@ -1011,9 +1357,9 @@ mod tests {
         }
     }
 
-    fn audio_game_config() -> ffi::GameConfig {
+    fn scene_demo_config() -> ffi::GameConfig {
         ffi::GameConfig {
-            title: "audio".to_owned(),
+            title: "scene demo".to_owned(),
             width: 960,
             height: 540,
             assets_dir: Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1202,7 +1548,7 @@ mod tests {
 
     #[test]
     fn sounds_load_without_a_device_and_handles_are_validated() {
-        let mut engine = new_game_engine(audio_game_config());
+        let mut engine = new_game_engine(scene_demo_config());
         let sound = engine.load_sound("beep.wav");
         assert_ne!(sound, 0);
         assert_eq!(engine.load_sound("../../secret.wav"), 0);
@@ -1224,6 +1570,72 @@ mod tests {
         assert!((engine.master_volume() - 0.4).abs() < f32::EPSILON);
         engine.set_master_volume(2.0);
         assert!((engine.master_volume() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn physics3d_handles_and_ray_use_the_bridge_ids() {
+        let mut engine = new_engine(config());
+        engine.set_gravity3d(0.0, 0.0, 0.0);
+        let body = engine.add_body3d(2, 0.0, 0.0, 0.0);
+        let collider = engine.add_collider3d(body, 2, 1.0, 1.0, 1.0);
+        assert_ne!(body, 0);
+        assert_ne!(collider, 0);
+        assert_eq!(engine.add_body3d(99, 0.0, 0.0, 0.0), 0);
+        assert_eq!(engine.add_collider3d(999, 2, 1.0, 1.0, 1.0), 0);
+        assert!(engine.step_physics3d(1.0 / 60.0));
+
+        let hit = engine.cast_ray3d(0.0, 5.0, 0.0, 0.0, -1.0, 0.0, 10.0);
+        assert!(hit.hit);
+        assert_eq!(hit.collider, collider);
+        assert!((3.9..4.1).contains(&hit.toi));
+        assert!(!engine.cast_ray3d(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0).hit);
+
+        let state = engine.body_state3d(body);
+        assert!(state.valid);
+        assert!(!engine.body_state3d(999).valid);
+        assert!(engine.apply_impulse3d(body, 1.0, 0.0, 0.0));
+        assert!(!engine.apply_impulse3d(999, 1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn gltf_meshes_and_draw_orders_are_validated() {
+        let mut engine = new_game_engine(scene_demo_config());
+        let gltf = engine.load_gltf("triangle.glb");
+        assert_ne!(gltf, 0);
+        assert_eq!(engine.load_gltf("../secret.glb"), 0);
+
+        let mesh = engine.define_mesh(gltf, 0, 0);
+        assert_ne!(mesh, 0);
+        assert!(engine.mesh_vertex_count(mesh) >= 3);
+        assert!(engine.mesh_index_count(mesh) >= 3);
+        assert_eq!(engine.define_mesh(999, 0, 0), 0);
+
+        assert!(engine.set_camera3d(
+            0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.5, 0.1, 10.0
+        ));
+        assert!(
+            engine
+                .view_projection3d()
+                .values
+                .iter()
+                .all(|value| value.is_finite())
+        );
+        assert!(!engine.set_camera3d(
+            0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.1, 10.0
+        ));
+
+        let draw = ffi::MeshDrawCpp {
+            mesh,
+            model: engine.view_projection3d().values,
+            color: [1.0, 1.0, 1.0, 1.0],
+        };
+        assert!(engine.submit_mesh_draws(&[draw]));
+        assert_eq!(engine.mesh_draw_count(), 1);
+        assert_eq!(engine.mesh_draw(0), draw);
+        assert!(!engine.submit_mesh_draws(&[ffi::MeshDrawCpp { mesh: 999, ..draw }]));
+
+        engine.begin_render();
+        assert_eq!(engine.mesh_draw_count(), 0);
     }
 
     #[test]

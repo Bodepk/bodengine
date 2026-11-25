@@ -5,3 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[features]
+# La conversión glTF→malla solo la activa la bridge; `dim3` sigue sin assets.
+gltf = ["dep:lunar_assets"]
+
+[dependencies]
+lunar_assets = { workspace = true, features = ["gltf"], optional = true }

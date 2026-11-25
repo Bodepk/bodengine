@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H15 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023) y audio desde C++ (ADR-024). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H16 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024) y servicios 3D en C++ (ADR-025). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -39,7 +39,7 @@ crates/
   lunar_platform    winit confinado; crea la surface nativa de wgpu
   lunar_render      Render wgpu, viewport y presentación
   lunar_render2d    Render 2D (marcador de feature)
-  lunar_render3d    Render 3D (marcador de feature)
+  lunar_render3d    Superficie CPU de mallas y órdenes 3D
   lunar_physics2d   Rapier 2D
   lunar_physics3d   Rapier 3D
   lunar_assets      Decodificación PNG/JPEG, glTF 2.0 y handles opacos
@@ -47,7 +47,7 @@ crates/
   lunar_scenes      Escenas JSON versionadas y validación sin GPU
   lunar_editor      Núcleo de edición headless: comandos, selección y undo/redo
   lunar_editor_ui   GUI opcional con egui: vista 2D, assets, jerarquía e inspector
-  lunar_bridge      Frontera cxx / API C++ con servicios 2D y bucle para juegos C++
+  lunar_bridge      Frontera cxx / API C++ con servicios 2D, 3D, audio y bucle para juegos C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
 examples/cpp_smoke     Smoke C++ de la bridge cxx (CMake)
@@ -136,6 +136,8 @@ La API C++ también expone ratón, scroll y coordenadas de viewport (ADR-023): `
 
 El audio desde C++ (ADR-024) usa handles opacos `u64`: `load_sound`, `play_sound`, `stop_sound`, `stop_all_sounds`, `set_volume`, `set_master_volume`, `master_volume` e `is_sound_playing`. Las rutas se resuelven dentro de `assets_dir` y `rodio` no aparece en los headers instalados; sin dispositivo `play_sound` devuelve `0` y el juego continúa.
 
+Los servicios 3D desde C++ (ADR-025) añaden física `rapier3d` (`set_gravity3d`, `add_body3d`, `add_collider3d`, `body_state3d`, `apply_impulse3d`, `cast_ray3d`, `step_physics3d`), mallas glTF (`load_gltf`, `define_mesh`, `mesh_vertex_count`) y órdenes validadas (`set_camera3d`, `view_projection3d`, `submit_mesh_draws`, `mesh_draw`). `lunar_render3d` es una superficie CPU sin `wgpu`: los handles son opacos, `MeshDrawCpp` es POD y la presentación GPU de mallas queda para una ADR posterior. `dim3` sigue sin arrastrar assets ni la bridge; la conversión glTF→malla solo se activa en `lunar_bridge`.
+
 ## Hitos
 
 | Hito | Contenido | Estado |
@@ -156,5 +158,6 @@ El audio desde C++ (ADR-024) usa handles opacos `u64`: `load_sound`, `play_sound
 | H13 | SDK C++ instalable con `find_package` (ADR-022) | ✅ |
 | H14 | Input de ratón, scroll y viewport en C++ (ADR-023) | ✅ |
 | H15 | Audio desde C++ con handles opacos (ADR-024) | ✅ |
+| H16 | Servicios 3D desde C++ y órdenes de mallas (ADR-025) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).

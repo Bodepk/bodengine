@@ -1911,8 +1911,10 @@ dependencies = [
  "lunar_core",
  "lunar_math",
  "lunar_physics2d",
+ "lunar_physics3d",
  "lunar_platform",
  "lunar_render",
+ "lunar_render3d",
  "lunar_scenes",
 ]
 
@@ -1993,6 +1995,9 @@ version = "0.1.0"
 [[package]]
 name = "lunar_render3d"
 version = "0.1.0"
+dependencies = [
+ "lunar_assets",
+]
 
 [[package]]
 name = "lunar_runtime"

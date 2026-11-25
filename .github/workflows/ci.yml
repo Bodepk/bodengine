@@ -64,6 +64,7 @@ jobs:
         run: |
           grep -q 'mouse_state' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           grep -q 'load_sound' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
+          grep -q 'submit_mesh_draws' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           cmake -S examples/cpp_sdk_template -B build/cpp_sdk_template \
             -DCMAKE_PREFIX_PATH="$PWD/build/sdk-prefix"
           cmake --build build/cpp_sdk_template --config Release
@@ -215,12 +216,16 @@ jobs:
           ! grep -q 'lunar_editor' tree-platformer.txt
           ! grep -q 'egui v' tree-platformer.txt
           ! grep -q 'eframe v' tree-platformer.txt
-      - name: Bridge tree exposes 2D and audio services but no GUI
+      - name: Bridge tree exposes 2D, 3D and audio services but no GUI
         shell: bash
         run: |
           cargo tree -e features -p lunar_bridge > tree-bridge.txt
           grep -q 'lunar_render v' tree-bridge.txt
           grep -q 'rapier2d' tree-bridge.txt
+          grep -q 'rapier3d' tree-bridge.txt
+          grep -q 'lunar_physics3d' tree-bridge.txt
+          grep -q 'lunar_render3d' tree-bridge.txt
+          grep -q 'gltf v' tree-bridge.txt
           grep -q 'lunar_assets v' tree-bridge.txt
           grep -q 'lunar_audio v' tree-bridge.txt
           grep -q 'rodio v' tree-bridge.txt

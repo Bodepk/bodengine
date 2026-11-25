@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <lunar_bridge/game.h>
 #include <lunar_bridge/src/lib.rs.h>
@@ -68,6 +69,30 @@ int main() {
         return 1;
     }
     engine->stop_all_sounds();
+
+    // Servicios 3D sin assets: los handles inválidos se rechazan en Rust.
+    engine->set_gravity3d(0.0f, 0.0f, 0.0f);
+    const std::uint64_t body3d = engine->add_body3d(2, 0.0f, 0.0f, 0.0f);
+    const std::uint64_t collider3d = engine->add_collider3d(body3d, 2, 1.0f, 1.0f, 1.0f);
+    if (body3d == 0 || collider3d == 0 || !engine->step_physics3d(1.0f / 60.0f) ||
+        !engine->body_state3d(body3d).valid || engine->apply_impulse3d(999, 1.0f, 0.0f, 0.0f) ||
+        engine->cast_ray3d(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f).hit) {
+        std::cerr << "la validación de física 3D desde C++ falló\n";
+        return 1;
+    }
+    if (!engine->set_camera3d(0.0f, 0.0f, 3.0f, 0.0f, 0.0f, 0.0f,
+                              0.0f, 1.0f, 0.0f, 1.0f, 1.5f, 0.1f, 10.0f) ||
+        engine->view_projection3d().values.at(0) == 0.0f) {
+        std::cerr << "la cámara 3D desde C++ falló\n";
+        return 1;
+    }
+    const std::vector<MeshDrawCpp> invalid_draws{
+        MeshDrawCpp{999, engine->view_projection3d().values, {1.0f, 1.0f, 1.0f, 1.0f}}};
+    if (engine->submit_mesh_draws(rust::Slice<const MeshDrawCpp>(invalid_draws)) ||
+        engine->mesh_draw_count() != 0) {
+        std::cerr << "una orden 3D inválida fue aceptada\n";
+        return 1;
+    }
 
     // Los 60 frames siguientes producen un tick cada uno.
     for (int frame = 1; frame < 61; ++frame) {
