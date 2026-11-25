@@ -157,6 +157,23 @@ jobs:
           grep -q 'eframe v0.37.0' tree-editor-ui.txt
           grep -q 'egui-wgpu v0.37.0' tree-editor-ui.txt
           ! grep -q 'eframe feature "glow"' tree-editor-ui.txt
+      - name: Sprite platformer tree uses 2D, assets and scenes only
+        shell: bash
+        run: |
+          cargo tree -e features -p sprite_platformer > tree-platformer.txt
+          grep -q 'rapier2d' tree-platformer.txt
+          grep -q 'lunar_render v' tree-platformer.txt
+          grep -q 'lunar_assets v' tree-platformer.txt
+          grep -q 'lunar_scenes v' tree-platformer.txt
+          ! grep -q 'rapier3d' tree-platformer.txt
+          ! grep -q 'lunar_physics3d' tree-platformer.txt
+          ! grep -q 'lunar_render3d' tree-platformer.txt
+          ! grep -q 'rodio' tree-platformer.txt
+          ! grep -q 'cpal' tree-platformer.txt
+          ! grep -q 'lunar_bridge' tree-platformer.txt
+          ! grep -q 'lunar_editor' tree-platformer.txt
+          ! grep -q 'egui v' tree-platformer.txt
+          ! grep -q 'eframe v' tree-platformer.txt
       - name: Partial builds compile
         shell: bash
         run: |

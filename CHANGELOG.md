@@ -18,6 +18,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - La GUI delega cada mutación a `EditorDocument::apply`; el núcleo `lunar_editor` no gana dependencias nuevas.
 - La API de sprites no añade tipos `wgpu` públicos ni nuevas dependencias; `lunar_scenes` mantiene el esquema de versión 1.
 - El pipeline de sprites vive en `lunar_render`, detrás de la feature `render`; los builds sin render siguen sin incluirlo.
+- CI verifica que `sprite_platformer` arrastra solo `dim2`, `assets` y `scenes`, sin 3D, audio, bridge ni GUI.
 
 ## [0.1.0] — 2026-11-24
 
