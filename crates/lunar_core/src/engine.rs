@@ -87,6 +87,16 @@ impl Engine {
     pub const fn input(&self) -> &InputState {
         &self.input
     }
+
+    /// Reinicia el reloj de paso fijo y los contadores (ADR-028).
+    ///
+    /// No toca el mundo ECS ni el input: el replay se encarga de reaplicar el
+    /// estado de entrada de cada frame desde una escena equivalente.
+    pub fn reset_timing(&mut self) {
+        self.step = None;
+        self.tick_count = 0;
+        self.frame_count = 0;
+    }
 }
 
 #[cfg(test)]
@@ -146,5 +156,23 @@ mod tests {
         let tick = engine.update(&clock);
         assert_eq!(tick.substeps, 0);
         assert_eq!(engine.tick_count, 0);
+    }
+
+    #[test]
+    fn reset_timing_clears_counters_and_step() {
+        let mut engine = Engine::new(EngineConfig::new("test", 800, 600));
+        let mut clock = ManualClock::default();
+        engine.update(&clock);
+        clock.advance(FIXED_DT);
+        engine.update(&clock);
+        assert_eq!(engine.tick_count, 1);
+        assert_eq!(engine.frame_count, 2);
+
+        engine.reset_timing();
+        assert_eq!(engine.tick_count, 0);
+        assert_eq!(engine.frame_count, 0);
+        let tick = engine.update(&clock);
+        assert_eq!(tick.substeps, 0);
+        assert_eq!(engine.frame_count, 1);
     }
 }

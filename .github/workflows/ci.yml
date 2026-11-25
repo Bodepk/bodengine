@@ -27,6 +27,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace
+      - name: Diagnostics and deterministic replay tests
+        run: |
+          cargo test -p lunar_core reset_timing
+          cargo test -p lunar_bridge metrics_and_structured_logs_are_bounded
+          cargo test -p lunar_bridge replay_reproduces_the_same_state_hash
+          grep -q 'pub const fn input' crates/lunar_core/src/engine.rs
       - name: All-features check
         run: cargo check -p lunar --all-features
       - name: Configure C++ smoke
@@ -66,6 +72,10 @@ jobs:
           grep -q 'load_sound' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           grep -q 'submit_mesh_draws' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           grep -q 'poll_scene_reload' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
+          grep -q 'FrameMetricsCpp' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
+          grep -q 'ReplayFrameCpp' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
+          grep -q 'state_hash' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
+          grep -q 'start_replay_playback' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           cmake -S examples/cpp_sdk_template -B build/cpp_sdk_template \
             -DCMAKE_PREFIX_PATH="$PWD/build/sdk-prefix"
           cmake --build build/cpp_sdk_template --config Release

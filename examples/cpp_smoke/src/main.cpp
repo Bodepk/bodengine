@@ -68,6 +68,53 @@ int main() {
         return 1;
     }
 
+    // Métricas y log estructurado: la medición de CPU no altera la simulación.
+    const FrameMetricsCpp metrics = engine->frame_metrics();
+    if (metrics.frame_count != stats.frame_count || metrics.tick_count != stats.tick_count ||
+        metrics.dropped_ns != stats.dropped_ns || engine->state_hash() == 0) {
+        std::cerr << "las métricas o el hash de estado no son coherentes\n";
+        return 1;
+    }
+    if (!engine->log_event(2, 10, 7, 9) || engine->log_count() != 1 ||
+        engine->log_entry(0).code != 10 || engine->log_entry(0).b != 9) {
+        std::cerr << "el log estructurado desde C++ falló\n";
+        return 1;
+    }
+
+    // Grabar y reproducir desde dos motores equivalentes debe dar el mismo hash.
+    auto recorded = new_engine(EngineConfig{"Lunar replay", 320, 240});
+    if (!recorded->begin_replay_recording()) {
+        std::cerr << "no se pudo iniciar la grabación\n";
+        return 1;
+    }
+    recorded->press_key(2, true);
+    recorded->tick(kFixedDtNs);
+    recorded->press_key(2, false);
+    recorded->tick(kFixedDtNs);
+    const std::uint32_t count = recorded->end_replay_recording();
+    if (count != 2 || recorded->recorded_frame_count() != count) {
+        std::cerr << "la grabación de input no produjo dos frames\n";
+        return 1;
+    }
+    std::vector<ReplayFrameCpp> frames;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        frames.push_back(recorded->recorded_frame(i));
+    }
+    auto replayed = new_engine(EngineConfig{"Lunar replay", 320, 240});
+    if (!replayed->load_replay_frames(rust::Slice<const ReplayFrameCpp>(frames)) ||
+        !replayed->start_replay_playback() || !replayed->is_replay_playing()) {
+        std::cerr << "no se pudo cargar el replay\n";
+        return 1;
+    }
+    for (std::uint32_t i = 0; i < count; ++i) {
+        replayed->tick(0);
+    }
+    if (replayed->state_hash() != recorded->state_hash() ||
+        !replayed->stop_replay_playback()) {
+        std::cerr << "el replay no reprodujo el mismo estado\n";
+        return 1;
+    }
+
     std::cout << "C++ smoke: " << std::string(engine->title()) << ' '
               << engine->width() << "x" << engine->height() << " | frames "
               << stats.frame_count << " | ticks " << stats.tick_count << '\n';

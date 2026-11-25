@@ -112,6 +112,20 @@ int main() {
         return 1;
     }
 
+    // Diagnósticos del SDK: métricas, log y replay sin dispositivos externos.
+    if (engine->frame_metrics().frame_count != stats.frame_count ||
+        engine->state_hash() == 0 || !engine->log_event(2, 10, 1, 2) ||
+        engine->log_entry(0).code != 10) {
+        std::cerr << "los diagnósticos del SDK fallaron\n";
+        return 1;
+    }
+    if (!engine->begin_replay_recording() || engine->end_replay_recording() != 0 ||
+        !engine->load_replay_frames(rust::Slice<const ReplayFrameCpp>()) ||
+        engine->start_replay_playback() || engine->stop_replay_playback()) {
+        std::cerr << "el replay vacío del SDK falló\n";
+        return 1;
+    }
+
     std::cout << "SDK template: " << std::string(engine->title()) << ' '
               << engine->width() << "x" << engine->height() << " | frames "
               << stats.frame_count << " | ticks " << stats.tick_count << '\n';

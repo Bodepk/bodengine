@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use lunar_assets::{
     ImageHandle, ImageStore,
@@ -16,7 +16,7 @@ use lunar_assets::{
 };
 use lunar_audio::{AudioHandle, AudioPlayer, AudioStore, SoundHandle};
 use lunar_core::{
-    Engine as CoreEngine, EngineConfig as CoreEngineConfig, InputState, Key, ManualClock,
+    Clock, Engine as CoreEngine, EngineConfig as CoreEngineConfig, InputState, Key, ManualClock,
     SystemClock, Tick,
 };
 use lunar_math::{Vec2, Vec3};
@@ -43,6 +43,15 @@ pub struct Engine {
     mouse: MouseState,
     mouse_snapshot: MouseSnapshot,
     last_tick: Tick,
+    cpu_ns: u64,
+    render_ns: u64,
+    last_elapsed_ns: u64,
+    logs: std::collections::VecDeque<ffi::LogEntryCpp>,
+    next_log_seq: u64,
+    replay_frames: Vec<ffi::ReplayFrameCpp>,
+    replay_recording: bool,
+    replay_playing: bool,
+    replay_index: usize,
     physics: PhysicsWorld2D,
     physics3d: PhysicsWorld3D,
     bodies: HashMap<u64, BodyId>,
@@ -161,6 +170,27 @@ fn empty_tick() -> Tick {
     }
 }
 
+/// FNV-1a sin dependencias, usado para huellas de archivos y de estado.
+fn hash_u64(hash: &mut u64, value: u64) {
+    *hash ^= value;
+    *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+}
+
+fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
+    hash_u64(hash, bytes.len() as u64);
+    for byte in bytes {
+        hash_u64(hash, u64::from(*byte));
+    }
+}
+
+fn hash_str(hash: &mut u64, value: &str) {
+    hash_bytes(hash, value.as_bytes());
+}
+
+fn hash_f32(hash: &mut u64, value: f32) {
+    hash_u64(hash, value.to_bits().into());
+}
+
 fn key_code(key: Key) -> u32 {
     match key {
         Key::Escape => 1,
@@ -269,6 +299,233 @@ impl Engine {
         }
     }
 
+    /// Métricas aditivas del último frame. Los tiempos no gobiernan la simulación.
+    fn frame_metrics(&self) -> ffi::FrameMetricsCpp {
+        ffi::FrameMetricsCpp {
+            cpu_ns: self.cpu_ns,
+            render_ns: self.render_ns,
+            draws_2d: self.draws.len() as u32,
+            draws_3d: self.render3d.draws().len() as u32,
+            invalid_draws: u32::from(self.invalid_draw),
+            dropped_ns: self.last_tick.dropped_time.as_nanos() as u64,
+            substeps: self.last_tick.substeps,
+            frame_count: self.inner.frame_count,
+            tick_count: self.inner.tick_count,
+        }
+    }
+
+    /// Añade una entrada al log estructurado; descarta la más antigua al llenarse.
+    fn log_event(&mut self, level: u8, code: u16, a: u64, b: u64) -> bool {
+        if level > 4 {
+            return false;
+        }
+        let seq = self.next_log_seq;
+        self.next_log_seq += 1;
+        if self.logs.len() == 256 {
+            self.logs.pop_front();
+        }
+        self.logs.push_back(ffi::LogEntryCpp {
+            seq,
+            level,
+            code,
+            a,
+            b,
+        });
+        true
+    }
+
+    fn log_count(&self) -> u32 {
+        self.logs.len() as u32
+    }
+
+    fn log_entry(&self, index: u32) -> ffi::LogEntryCpp {
+        self.logs.get(index as usize).copied().unwrap_or_default()
+    }
+
+    /// Máscara de teclado con el mismo significado que los códigos de ADR-006.
+    fn key_mask(&self) -> u32 {
+        let mut mask = 0;
+        for code in 1..=9 {
+            if from_key_code(code).is_some_and(|key| self.inner.input().is_down(key)) {
+                mask |= 1 << (code - 1);
+            }
+        }
+        mask
+    }
+
+    fn mouse_mask(&self) -> u32 {
+        let mut mask = 0;
+        for button in 1..=5 {
+            if self.mouse.down.contains(&button) {
+                mask |= 1 << (button - 1);
+            }
+        }
+        mask
+    }
+
+    fn capture_input_frame(&self, elapsed_ns: u64) -> ffi::ReplayFrameCpp {
+        ffi::ReplayFrameCpp {
+            elapsed_ns,
+            keys: self.key_mask(),
+            mouse: self.mouse_mask(),
+            cursor_x: self.mouse.cursor_x as f32,
+            cursor_y: self.mouse.cursor_y as f32,
+            scroll_x: self.mouse.scroll_x,
+            scroll_y: self.mouse.scroll_y,
+        }
+    }
+
+    fn begin_replay_recording(&mut self) -> bool {
+        if self.replay_playing {
+            return false;
+        }
+        self.replay_frames.clear();
+        self.replay_recording = true;
+        true
+    }
+
+    fn end_replay_recording(&mut self) -> u32 {
+        self.replay_recording = false;
+        self.replay_frames.len() as u32
+    }
+
+    fn recorded_frame_count(&self) -> u32 {
+        self.replay_frames.len() as u32
+    }
+
+    fn recorded_frame(&self, index: u32) -> ffi::ReplayFrameCpp {
+        self.replay_frames
+            .get(index as usize)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Carga un replay externo; C++ puede reconstruirlo desde disco o desde otra engine.
+    fn load_replay_frames(&mut self, frames: &[ffi::ReplayFrameCpp]) -> bool {
+        if self.replay_playing {
+            return false;
+        }
+        self.replay_recording = false;
+        self.replay_frames.clear();
+        let valid = frames.iter().all(|frame| {
+            frame.cursor_x.is_finite()
+                && frame.cursor_y.is_finite()
+                && frame.scroll_x.is_finite()
+                && frame.scroll_y.is_finite()
+        });
+        if !valid {
+            return false;
+        }
+        self.replay_frames.extend_from_slice(frames);
+        true
+    }
+
+    fn apply_replay_input(&mut self, frame: ffi::ReplayFrameCpp) {
+        for code in 1..=9 {
+            let Some(key) = from_key_code(code) else {
+                continue;
+            };
+            let down = frame.keys & (1 << (code - 1)) != 0;
+            let input = self.inner.input_mut();
+            if down {
+                input.press(key);
+            } else {
+                input.release(key);
+            }
+        }
+        for button in 1..=5 {
+            let down = frame.mouse & (1 << (button - 1)) != 0;
+            self.press_mouse(button, down);
+        }
+        self.set_cursor(frame.cursor_x.into(), frame.cursor_y.into());
+        if frame.scroll_x != 0.0 || frame.scroll_y != 0.0 {
+            self.add_scroll(frame.scroll_x, frame.scroll_y, false);
+        }
+    }
+
+    /// Prepara una reproducción desde un estado equivalente al de la grabación.
+    fn start_replay_playback(&mut self) -> bool {
+        if self.replay_playing || self.replay_frames.is_empty() {
+            return false;
+        }
+        self.replay_recording = false;
+        self.replay_playing = true;
+        self.replay_index = 0;
+        self.manual_clock.set(Duration::ZERO);
+        self.inner.reset_timing();
+        self.last_elapsed_ns = 0;
+        self.log_event(2, 2, self.replay_frames.len() as u64, 0);
+        true
+    }
+
+    fn stop_replay_playback(&mut self) -> bool {
+        if !self.replay_playing {
+            return false;
+        }
+        self.replay_playing = false;
+        self.log_event(2, 3, self.replay_index as u64, 0);
+        true
+    }
+
+    fn is_replay_playing(&self) -> bool {
+        self.replay_playing
+    }
+
+    /// Huella determinista de contadores, input, física y escena, sin tipos FFI nuevos.
+    fn state_hash(&self) -> u64 {
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        hash_u64(&mut hash, self.inner.tick_count);
+        hash_u64(&mut hash, self.inner.frame_count);
+        hash_u64(&mut hash, u64::from(self.last_tick.substeps));
+        hash_u64(&mut hash, self.last_tick.dropped_time.as_nanos() as u64);
+        hash_u64(&mut hash, u64::from(self.key_mask()));
+        hash_u64(&mut hash, u64::from(self.mouse_mask()));
+        hash_f32(&mut hash, self.mouse.cursor_x as f32);
+        hash_f32(&mut hash, self.mouse.cursor_y as f32);
+        hash_f32(&mut hash, self.mouse.scroll_x);
+        hash_f32(&mut hash, self.mouse.scroll_y);
+
+        let mut bodies: Vec<_> = self.bodies.iter().collect();
+        bodies.sort_by_key(|(id, _)| **id);
+        for (id, body) in bodies {
+            let Some(state) = self.physics.body_state(*body) else {
+                continue;
+            };
+            hash_u64(&mut hash, *id);
+            hash_f32(&mut hash, state.position.x);
+            hash_f32(&mut hash, state.position.y);
+            hash_f32(&mut hash, state.rotation);
+            hash_f32(&mut hash, state.linvel.x);
+            hash_f32(&mut hash, state.linvel.y);
+        }
+
+        let mut bodies3d: Vec<_> = self.bodies3d.iter().collect();
+        bodies3d.sort_by_key(|(id, _)| **id);
+        for (id, body) in bodies3d {
+            let Some(state) = self.physics3d.body_state(*body) else {
+                continue;
+            };
+            hash_u64(&mut hash, *id);
+            hash_f32(&mut hash, state.position.x);
+            hash_f32(&mut hash, state.position.y);
+            hash_f32(&mut hash, state.position.z);
+            hash_f32(&mut hash, state.rotation.x);
+            hash_f32(&mut hash, state.rotation.y);
+            hash_f32(&mut hash, state.rotation.z);
+            hash_f32(&mut hash, state.rotation.w);
+            hash_f32(&mut hash, state.linvel.x);
+            hash_f32(&mut hash, state.linvel.y);
+            hash_f32(&mut hash, state.linvel.z);
+        }
+
+        if let Some(editor) = self.editor.as_ref()
+            && let Ok(json) = editor.scene().to_json()
+        {
+            hash_str(&mut hash, &json);
+        }
+        hash
+    }
+
     fn substeps(&self) -> u32 {
         self.last_tick.substeps
     }
@@ -279,21 +536,47 @@ impl Engine {
 
     /// Avanza el reloj inyectado y devuelve el resultado del frame.
     fn tick(&mut self, elapsed_ns: u64) -> ffi::FrameStats {
+        let started = Instant::now();
+        let replay = if self.replay_playing && self.replay_index < self.replay_frames.len() {
+            let frame = self.replay_frames[self.replay_index];
+            self.replay_index += 1;
+            Some(frame)
+        } else {
+            None
+        };
+        if let Some(frame) = replay {
+            self.apply_replay_input(frame);
+        }
+        let captured = self.capture_input_frame(elapsed_ns);
+        let elapsed = replay.map_or(elapsed_ns, |frame| frame.elapsed_ns);
         self.input_snapshot = self.inner.input().clone();
         self.mouse_snapshot = self.mouse.snapshot();
         self.mouse.end_frame();
-        self.manual_clock
-            .advance(std::time::Duration::from_nanos(elapsed_ns));
+        if self.replay_recording && replay.is_none() {
+            self.replay_frames.push(captured);
+        }
+        self.manual_clock.advance(Duration::from_nanos(elapsed));
         self.last_tick = self.inner.update(&self.manual_clock);
+        self.last_elapsed_ns = elapsed;
+        self.cpu_ns = started.elapsed().as_nanos() as u64;
         self.stats()
     }
 
     /// Avanza con el reloj del sistema; el host lo llama una vez por frame.
     fn tick_system(&mut self) -> ffi::FrameStats {
+        let started = Instant::now();
+        let now = self.system_clock.elapsed().as_nanos() as u64;
+        let delta = now.saturating_sub(self.last_elapsed_ns);
+        self.last_elapsed_ns = now;
+        let captured = self.capture_input_frame(delta);
         self.input_snapshot = self.inner.input().clone();
         self.mouse_snapshot = self.mouse.snapshot();
         self.mouse.end_frame();
+        if self.replay_recording {
+            self.replay_frames.push(captured);
+        }
         self.last_tick = self.inner.update(&self.system_clock);
+        self.cpu_ns = started.elapsed().as_nanos() as u64;
         self.stats()
     }
 
@@ -1141,6 +1424,15 @@ fn new_with_config(config: CoreEngineConfig, assets_dir: PathBuf) -> Box<Engine>
         mouse: MouseState::default(),
         mouse_snapshot: MouseSnapshot::default(),
         last_tick: empty_tick(),
+        cpu_ns: 0,
+        render_ns: 0,
+        last_elapsed_ns: 0,
+        logs: std::collections::VecDeque::new(),
+        next_log_seq: 1,
+        replay_frames: Vec::new(),
+        replay_recording: false,
+        replay_playing: false,
+        replay_index: 0,
         physics: PhysicsWorld2D::new(Vec2::new(0.0, -9.81)),
         physics3d: PhysicsWorld3D::new(Vec3::new(0.0, -9.81, 0.0)),
         bodies: HashMap::new(),
@@ -1222,6 +1514,7 @@ impl PlatformApp for Host<'_> {
     }
 
     fn on_render(&mut self, renderer: &mut Renderer<'_>) {
+        let started = Instant::now();
         if let Some(viewport) = renderer.viewport() {
             self.engine.viewport = ffi::ViewportInfo {
                 width: viewport.width,
@@ -1231,8 +1524,12 @@ impl PlatformApp for Host<'_> {
         self.engine.begin_render();
         self.game.as_mut().on_render();
         if !self.engine.flush_render(renderer) {
+            let _ =
+                self.engine
+                    .log_event(1, 1, self.engine.frame_metrics().invalid_draws.into(), 0);
             eprintln!("no se pudieron enviar las órdenes de dibujo de C++");
         }
+        self.engine.render_ns = started.elapsed().as_nanos() as u64;
     }
 }
 
@@ -1271,6 +1568,42 @@ mod ffi {
         dropped_ns: u64,
         frame_count: u64,
         tick_count: u64,
+    }
+
+    /// Métricas aditivas de CPU y render (ADR-028), sin sustituir a `FrameStats`.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct FrameMetricsCpp {
+        cpu_ns: u64,
+        render_ns: u64,
+        draws_2d: u32,
+        draws_3d: u32,
+        invalid_draws: u32,
+        dropped_ns: u64,
+        substeps: u32,
+        frame_count: u64,
+        tick_count: u64,
+    }
+
+    /// Entrada estructurada de un frame, con códigos estables por hito.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct LogEntryCpp {
+        seq: u64,
+        level: u8,
+        code: u16,
+        a: u64,
+        b: u64,
+    }
+
+    /// Input de un frame grabado; bits de teclado `code - 1` y ratón `button - 1`.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct ReplayFrameCpp {
+        elapsed_ns: u64,
+        keys: u32,
+        mouse: u32,
+        cursor_x: f32,
+        cursor_y: f32,
+        scroll_x: f32,
+        scroll_y: f32,
     }
 
     #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -1417,6 +1750,21 @@ mod ffi {
         fn alpha(self: &Engine) -> f32;
         fn tick(self: &mut Engine, elapsed_ns: u64) -> FrameStats;
         fn tick_system(self: &mut Engine) -> FrameStats;
+        fn frame_metrics(self: &Engine) -> FrameMetricsCpp;
+        fn state_hash(self: &Engine) -> u64;
+
+        fn log_event(self: &mut Engine, level: u8, code: u16, a: u64, b: u64) -> bool;
+        fn log_count(self: &Engine) -> u32;
+        fn log_entry(self: &Engine, index: u32) -> LogEntryCpp;
+
+        fn begin_replay_recording(self: &mut Engine) -> bool;
+        fn end_replay_recording(self: &mut Engine) -> u32;
+        fn recorded_frame_count(self: &Engine) -> u32;
+        fn recorded_frame(self: &Engine, index: u32) -> ReplayFrameCpp;
+        fn load_replay_frames(self: &mut Engine, frames: &[ReplayFrameCpp]) -> bool;
+        fn start_replay_playback(self: &mut Engine) -> bool;
+        fn stop_replay_playback(self: &mut Engine) -> bool;
+        fn is_replay_playing(self: &Engine) -> bool;
 
         fn press_key(self: &mut Engine, code: u32, pressed: bool);
         fn is_key_down(self: &Engine, code: u32) -> bool;
@@ -1949,5 +2297,93 @@ mod tests {
         assert!(safe_asset_path(&engine.assets_dir, "sprites/goal_end.png").is_some());
         assert!(safe_asset_path(&engine.assets_dir, "../secret.png").is_none());
         assert!(safe_asset_path(&engine.assets_dir, "/etc/passwd").is_none());
+    }
+
+    #[test]
+    fn metrics_and_structured_logs_are_bounded() {
+        let mut engine = new_engine(config());
+        assert_eq!(engine.frame_metrics(), ffi::FrameMetricsCpp::default());
+        let stats = engine.tick(FIXED_DT.as_nanos() as u64);
+        let metrics = engine.frame_metrics();
+        assert_eq!(metrics.frame_count, stats.frame_count);
+        assert_eq!(metrics.tick_count, stats.tick_count);
+        assert_eq!(metrics.dropped_ns, stats.dropped_ns);
+
+        assert!(engine.log_event(2, 42, 7, 9));
+        let entry = engine.log_entry(0);
+        assert_eq!(
+            (entry.seq, entry.level, entry.code, entry.a, entry.b),
+            (1, 2, 42, 7, 9)
+        );
+        assert!(!engine.log_event(5, 1, 0, 0));
+        for value in 0..300 {
+            assert!(engine.log_event(3, 7, value, 0));
+        }
+        assert_eq!(engine.log_count(), 256);
+        assert_eq!(engine.log_entry(0).seq, 46);
+        assert_eq!(engine.log_entry(255).seq, 301);
+        assert_eq!(engine.log_entry(999), ffi::LogEntryCpp::default());
+    }
+
+    #[test]
+    fn replay_reproduces_the_same_state_hash() {
+        let dt_ns = FIXED_DT.as_nanos() as u64;
+        let dt_s = FIXED_DT.as_secs_f32();
+        let mut recorded = new_game_engine(scene_demo_config());
+        assert!(recorded.load_scene("demo.scene.json"));
+        let body = recorded.add_body(1, 0.0, 2.0);
+        assert_ne!(body, 0);
+        assert_ne!(recorded.add_collider(body, 2, 0.5, 0.25), 0);
+
+        assert!(recorded.begin_replay_recording());
+        recorded.press_key(2, true);
+        recorded.tick(dt_ns);
+        recorded.step_physics(dt_s);
+        recorded.press_mouse(3, true);
+        recorded.tick(dt_ns);
+        recorded.step_physics(dt_s);
+        recorded.set_cursor(10.0, 20.0);
+        recorded.add_scroll(0.0, 1.0, false);
+        recorded.tick(dt_ns);
+        recorded.step_physics(dt_s);
+        recorded.press_key(2, false);
+        recorded.press_mouse(3, false);
+        recorded.tick(dt_ns);
+        recorded.step_physics(dt_s);
+        let count = recorded.end_replay_recording();
+        assert_eq!(count, 4);
+        assert_eq!(recorded.recorded_frame_count(), count);
+        let frames: Vec<_> = (0..count)
+            .map(|index| recorded.recorded_frame(index))
+            .collect();
+        assert_eq!(frames[0].keys, 1 << 1);
+        assert_eq!(frames[1].mouse, 1 << 2);
+        assert_eq!(frames[2].scroll_y, 1.0);
+        assert_eq!(frames[3].elapsed_ns, dt_ns);
+        let expected = recorded.state_hash();
+        assert_ne!(expected, 0);
+
+        let mut replayed = new_game_engine(scene_demo_config());
+        assert!(replayed.load_scene("demo.scene.json"));
+        let body = replayed.add_body(1, 0.0, 2.0);
+        assert_ne!(replayed.add_collider(body, 2, 0.5, 0.25), 0);
+        assert!(replayed.load_replay_frames(&frames));
+        assert!(replayed.start_replay_playback());
+        assert!(replayed.is_replay_playing());
+        assert!(!replayed.load_replay_frames(&frames));
+        for _ in 0..count {
+            replayed.tick(0);
+            replayed.step_physics(dt_s);
+        }
+        assert_eq!(replayed.state_hash(), expected);
+        assert!(replayed.stop_replay_playback());
+        assert!(!replayed.is_replay_playing());
+
+        let invalid = ffi::ReplayFrameCpp {
+            cursor_x: f32::NAN,
+            ..ffi::ReplayFrameCpp::default()
+        };
+        assert!(!replayed.load_replay_frames(&[invalid]));
+        assert!(!replayed.start_replay_playback());
     }
 }

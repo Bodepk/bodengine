@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H18 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024), servicios 3D en C++ (ADR-025), documentos de escena y recarga desde C++ (ADR-026) y escenas v2 con sprites, animación y prefabs (ADR-027). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H19 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024), servicios 3D en C++ (ADR-025), documentos de escena y recarga desde C++ (ADR-026), escenas v2 con sprites, animación y prefabs (ADR-027) y diagnósticos, replay de input y hashes de estado (ADR-028). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -142,6 +142,8 @@ Los documentos de escena desde C++ (ADR-026) sustituyen al `Scene` suelto por un
 
 Las escenas v2 (ADR-027) conservan `Component::Image` intacto y añaden `Component::Sprite` con `SpriteMeta` y `AnimationClip`, además de `prefabs` y `Component::PrefabRef`. `Scene::from_json` lee documentos v2 de forma nativa y migra v1 solo con el conversor explícito `v1::upgrade`: cada imagen pasa a sprite de una celda sin clips. `Scene::instantiate_prefab` devuelve entidades con ids remapeados; la validación comprueba celdas, clips y ciclos de prefabs. No se añaden campos a `Image`, ni tipos de animación a la FFI, ni dependencias nuevas.
 
+Los diagnósticos (ADR-028) añaden `FrameMetricsCpp` con coste de CPU/render y número de órdenes, un log estructurado acotado (`log_event`, `log_count`, `log_entry`) y replay determinista de input (`begin_replay_recording`, `load_replay_frames`, `start_replay_playback`). `state_hash()` combina contadores, input, física 2D/3D y el JSON canónico de la escena con FNV-1a; los tiempos de CPU no entran en la huella. `FrameStats` sigue intacto y no hay dependencias nuevas.
+
 ## Hitos
 
 | Hito | Contenido | Estado |
@@ -165,5 +167,6 @@ Las escenas v2 (ADR-027) conservan `Component::Image` intacto y añaden `Compone
 | H16 | Servicios 3D desde C++ y órdenes de mallas (ADR-025) | ✅ |
 | H17 | Documentos de escena y recarga desde C++ (ADR-026) | ✅ |
 | H18 | Escenas v2 con sprites, animación y prefabs (ADR-027) | ✅ |
+| H19 | Diagnósticos, replay de input y hashes de estado (ADR-028) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).
