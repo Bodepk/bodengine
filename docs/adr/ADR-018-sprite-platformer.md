@@ -2,6 +2,7 @@
 
 - Estado: Aceptada
 - Fecha: 2026-11-24
+- Nota: el apartado «Fuera de alcance» que excluía la bridge C++ queda supersedido por ADR-021.
 
 ## Contexto
 
