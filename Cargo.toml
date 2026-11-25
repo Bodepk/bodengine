@@ -23,6 +23,7 @@ members = [
     "crates/lunar_audio",
     "crates/lunar_scenes",
     "crates/lunar_editor",
+    "crates/lunar_editor_ui",
     "crates/lunar_bridge",
     "crates/lunar_runtime",
     "examples/minimal_game",
@@ -39,6 +40,8 @@ publish = false
 
 [workspace.dependencies]
 bevy_ecs = "0.20.1"
+egui = { version = "0.37.0", default-features = false }
+eframe = { version = "0.37.0", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
 cxx = "1.0.205"
 cxx-build = "1.0.205"
 gltf = { version = "1.4.1", default-features = false, features = ["import", "names", "guess_mime_type"] }
@@ -63,6 +66,7 @@ lunar_assets = { path = "crates/lunar_assets" }
 lunar_audio = { path = "crates/lunar_audio" }
 lunar_scenes = { path = "crates/lunar_scenes" }
 lunar_editor = { path = "crates/lunar_editor" }
+lunar_editor_ui = { path = "crates/lunar_editor_ui" }
 lunar_bridge = { path = "crates/lunar_bridge" }
 lunar_runtime = { path = "crates/lunar_runtime" }
 
@@ -80,6 +84,7 @@ lunar_assets = { workspace = true, optional = true }
 lunar_audio = { workspace = true, optional = true }
 lunar_scenes = { workspace = true, optional = true }
 lunar_editor = { workspace = true, optional = true }
+lunar_editor_ui = { workspace = true, optional = true }
 lunar_bridge = { workspace = true, optional = true }
 lunar_runtime = { workspace = true, optional = true }
 
@@ -93,5 +98,6 @@ gltf = ["assets", "lunar_assets/gltf"]
 audio = ["dep:lunar_audio"]
 scenes = ["dep:lunar_scenes"]
 editor = ["dep:lunar_editor", "scenes"]
+editor_ui = ["editor", "dep:lunar_editor_ui"]
 bridge = ["dep:lunar_bridge"]
 runtime = ["dep:lunar_runtime"]
