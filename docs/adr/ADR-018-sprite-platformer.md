@@ -2,7 +2,7 @@
 
 - Estado: Aceptada
 - Fecha: 2026-11-24
-- Nota: el apartado «Fuera de alcance» que excluía la bridge C++ queda supersedido por ADR-021.
+- Nota: el apartado «Fuera de alcance» que excluía la bridge C++ queda supersedido por ADR-021. ADR-027 añade `Component::Sprite` con metadatos y clips; `Component::Image` sigue sin campos nuevos y el plataformas puede seguir usándolo.
 
 ## Contexto
 

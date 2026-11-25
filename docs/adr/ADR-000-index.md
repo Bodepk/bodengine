@@ -43,6 +43,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [024](ADR-024-cpp-audio.md) | Audio desde C++ | Aceptada |
 | [025](ADR-025-cpp-3d.md) | Servicios 3D en la bridge C++ | Aceptada |
 | [026](ADR-026-cpp-scene-documents.md) | Documentos de escena y recarga desde C++ | Aceptada |
+| [027](ADR-027-scene-v2-sprites.md) | Escenas v2 con sprites, animación y prefabs | Aceptada |
 
 ## Consecuencias
 

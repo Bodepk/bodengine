@@ -2,6 +2,7 @@
 
 - Estado: Aceptada
 - Fecha: 2026-11-24
+- Nota: ADR-027 eleva el esquema canónico a versión 2 con `prefabs`, `Component::Sprite` y `Component::PrefabRef`; la versión 1 se migra con el convertidor explícito `v1::upgrade`. El resto de esta ADR (rutas relativas, validación, errores propios) sigue vigente.
 
 ## Contexto
 
