@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H11 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con jerarquía e inspector (ADR-019). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H11 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con jerarquía e inspector (ADR-019) y un plataformas 2D jugable con sprites (ADR-018). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -52,6 +52,7 @@ crates/
 examples/minimal_game  Smoke 800x600 con render del H2
 examples/cpp_smoke     Smoke C++ de la bridge cxx (CMake)
 examples/scene_demo    Demo jugable: JSON, glTF, PNG, WAV y editor headless
+examples/sprite_platformer  Plataformas 2D: sprites, física Rapier y cámara
 docs/adr           Decisiones arquitectónicas
 tests/fixtures     Datos de prueba sin GPU
 ```
@@ -78,11 +79,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p minimal_game
 cargo run -p scene_demo
+cargo run -p sprite_platformer
 cargo run -p lunar_editor_ui                         # escena nueva vacía
 cargo run -p lunar_editor_ui -- ruta/a/scene.json    # abre un JSON existente
 ```
 
 El editor gráfico (ADR-019) muestra jerarquía, inspector de nombre/transformación/padre/componentes, deshacer y rehacer, y guardado JSON. Toda mutación pasa por `EditorDocument::apply`; el panel central es un diagrama de nodos, no una vista de juego ni un preview de sprites. Atajos: `Ctrl+S`, `Ctrl+Z`, `Ctrl+Shift+Z`/`Ctrl+Y` y `Supr`.
+
+El plataformas (ADR-018) abre una ventana 960×540 y consume `examples/sprite_platformer/assets/platformer.scene.json`. `A`/`D` o las flechas mueven, `W`/`ArrowUp` salta y `Escape` sale; recoger manzanas y llegar a la meta se informa por stdout. Usa sprites CC0 de Pixel Adventure 1, con procedencia en `assets/ASSETS.md`. `lunar_render` dibuja hojas de sprites mediante `SpriteId`/`SpriteDraw` sin exponer tipos `wgpu` nuevos.
 
 La demo abre una ventana 800×600 y consume `examples/scene_demo/assets/demo.scene.json`: lee el glTF, toma el color del PNG, reproduce el WAV con el volumen de la escena y muestra el editor headless. WASD mueve el triángulo, `W` reproduce el sonido, `S` lo detiene, `↑` renombra la entidad, `↓` deshace, `←` rehace y `Esc` cierra. Para regenerar los assets sintéticos:
 

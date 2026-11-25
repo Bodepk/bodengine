@@ -8,11 +8,16 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 
 - Editor gráfico opcional `lunar_editor_ui` con `egui`/`eframe` 0.37: jerarquía, inspector de nombre/transformación/padre/componentes, selección, undo/redo, abrir/guardar JSON y atajos de teclado (ADR-019).
 - Feature raíz `editor_ui`, que implica `editor` y queda fuera de `default`.
+- Pipeline de sprites en `lunar_render`: `SpriteId`, `SpriteDraw` y `SpriteError`, con hojas de fotogramas, blending alfa y sampler `Nearest` (ADR-018).
+- Ejemplo `sprite_platformer`: plataformas 2D con física Rapier, animación del jugador, cámara, manzanas y meta, usando `platformer.scene.json`.
+- Sprites CC0 de Pixel Adventure 1 copiados al ejemplo con nombres descriptivos y procedencia en `assets/ASSETS.md`.
 
 ### Seguridad y compatibilidad
 
 - Ni `default`, `dim2`, `dim3`, `assets`, `scenes` ni el build sin features incluyen `lunar_editor_ui`, `egui` ni `eframe`; CI verifica los árboles de dependencias.
 - La GUI delega cada mutación a `EditorDocument::apply`; el núcleo `lunar_editor` no gana dependencias nuevas.
+- La API de sprites no añade tipos `wgpu` públicos ni nuevas dependencias; `lunar_scenes` mantiene el esquema de versión 1.
+- El pipeline de sprites vive en `lunar_render`, detrás de la feature `render`; los builds sin render siguen sin incluirlo.
 
 ## [0.1.0] — 2026-11-24
 
