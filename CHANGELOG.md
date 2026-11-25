@@ -29,6 +29,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - La bridge C++ no expone `Renderer`, `Surface`, `ImageData`, escenas enteras ni Rapier por valor: solo handles, structs POD y órdenes de dibujo; `wgpu` sigue fuera de la API pública.
 - `lunar_bridge` no añade features ni dependencias externas; `bridge` y `default` pasan a incluir servicios 2D, mientras `dim2`, `dim3` y el build sin features siguen sin arrastrar la bridge.
 - El plataformas Rust se conserva como banco de pruebas sin `lunar_bridge`; CI verifica por separado el árbol de la bridge y ejecuta el juego C++ en modo headless en Linux, Windows y macOS.
+- Los ejemplos C++ enlazan explícitamente en macOS los frameworks que la staticlib Rust no propaga (`AppKit`, `Metal`, `MetalKit`, `QuartzCore`, `Security`, etc.).
 
 ## [0.1.0] — 2026-11-24
 

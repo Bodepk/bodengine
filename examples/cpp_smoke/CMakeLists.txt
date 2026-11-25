@@ -64,8 +64,20 @@ if(MSVC)
     kernel32 ntdll userenv ws2_32 dbghelp synchronization imm32 uxtheme dwmapi
   )
 elseif(APPLE)
-  target_link_libraries(cpp_smoke PRIVATE pthread m
-    "-framework Security" "-framework SystemConfiguration"
+  # Una staticlib Rust no propaga los `#[link]` de sus dependencias: CMake
+  # debe nombrar los frameworks que usan winit, wgpu y security-framework.
+  target_link_libraries(cpp_smoke PRIVATE pthread m objc iconv
+    "-framework AppKit"
+    "-framework CoreFoundation"
+    "-framework CoreGraphics"
+    "-framework Foundation"
+    "-framework IOKit"
+    "-framework Metal"
+    "-framework MetalKit"
+    "-framework QuartzCore"
+    "-framework Security"
+    "-framework SystemConfiguration"
+    "-framework UniformTypeIdentifiers"
   )
 else()
   target_link_libraries(cpp_smoke PRIVATE dl pthread m rt)
