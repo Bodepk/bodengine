@@ -18,6 +18,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - SDK C++ instalable en `sdk/cpp` (ADR-022): paquete CMake con headers públicos, header generado, staticlib, target importado `lunar::bridge` y versión exacta del workspace.
 - Ejemplo `examples/cpp_sdk_template`: proyecto C++ externo que consume el SDK con `find_package` y verifica el reloj manual sin abrir ventana; CI lo compila y ejecuta en los tres sistemas operativos.
 - Input de ratón en C++ (ADR-023): botones, posición del cursor, scroll por frame y conversión pantalla→NDC mediante structs POD nuevos; `Game` gana callbacks virtuales opcionales.
+- Audio desde C++ (ADR-024): `load_sound`, `play_sound`, `stop_sound`, `stop_all_sounds`, `set_volume`, `set_master_volume`, `master_volume` e `is_sound_playing`, con handles opacos y rutas validadas dentro de `assets_dir`.
 
 ### Seguridad y compatibilidad
 
@@ -36,6 +37,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - El SDK usa `ExactVersion` porque antes de 1.0 cualquier cambio de versión puede romper la ABI C++; la plantilla externa no referencia rutas del workspace y CI lo verifica.
 - El empaquetado no añade gestores de paquetes ni dependencias nuevas: solo CMake 3.20 y Cargo.
 - H14 no cambia el layout de `ViewportInfo`, `FrameStats` ni `EntityInfo`; `winit` y los tipos de eventos siguen confinados en `lunar_platform` y los nuevos callbacks de `Game` tienen implementación por defecto.
+- H15 solo añade un crate interno (`lunar_audio`) a la bridge: `rodio`, `cpal`, `SoundData` y los handles de `rodio` no cruzan la FFI; sin dispositivo `play_sound` devuelve `0` y los tests no dependen de hardware de audio. Los gates `dim2`, `dim3` y bare siguen sin arrastrar audio o bridge.
 
 ## [0.1.0] — 2026-11-24
 

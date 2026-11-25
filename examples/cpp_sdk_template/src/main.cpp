@@ -55,6 +55,20 @@ int main() {
         return 1;
     }
 
+    // Audio sin dispositivo: los handles inválidos se rechazan en Rust.
+    if (engine->load_sound("beep.wav") != 0 || engine->play_sound(999) != 0 ||
+        engine->stop_sound(999) || engine->set_volume(999, 0.5f) ||
+        engine->is_sound_playing(999)) {
+        std::cerr << "la validación de audio desde C++ falló\n";
+        return 1;
+    }
+    engine->set_master_volume(0.4f);
+    if (engine->master_volume() != 0.4f) {
+        std::cerr << "el volumen maestro no llegó a C++\n";
+        return 1;
+    }
+    engine->stop_all_sounds();
+
     // Los 60 frames siguientes producen un tick cada uno.
     for (int frame = 1; frame < 61; ++frame) {
         stats = engine->tick(kFixedDtNs);

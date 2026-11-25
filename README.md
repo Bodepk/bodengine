@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H14 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022) e input de ratón, scroll y conversión de viewport en C++ (ADR-023). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H15 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023) y audio desde C++ (ADR-024). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -134,6 +134,8 @@ La versión del paquete es `0.1.0` y se solicita con `EXACT`: antes de 1.0, un c
 
 La API C++ también expone ratón, scroll y coordenadas de viewport (ADR-023): `mouse_state`, `cursor_position`, `cursor_ndc`, `screen_to_ndc` y `scroll_delta` son aditivos; `Game` ofrece `on_mouse`, `on_cursor` y `on_scroll` como virtuales opcionales. `winit` sigue confinado en `lunar_platform` y los píxeles físicos se convierten a NDC en Rust.
 
+El audio desde C++ (ADR-024) usa handles opacos `u64`: `load_sound`, `play_sound`, `stop_sound`, `stop_all_sounds`, `set_volume`, `set_master_volume`, `master_volume` e `is_sound_playing`. Las rutas se resuelven dentro de `assets_dir` y `rodio` no aparece en los headers instalados; sin dispositivo `play_sound` devuelve `0` y el juego continúa.
+
 ## Hitos
 
 | Hito | Contenido | Estado |
@@ -153,5 +155,6 @@ La API C++ también expone ratón, scroll y coordenadas de viewport (ADR-023): `
 | H12 | Scripting C++ y plataformas portado a C++ (ADR-021) | ✅ |
 | H13 | SDK C++ instalable con `find_package` (ADR-022) | ✅ |
 | H14 | Input de ratón, scroll y viewport en C++ (ADR-023) | ✅ |
+| H15 | Audio desde C++ con handles opacos (ADR-024) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).

@@ -1907,6 +1907,7 @@ dependencies = [
  "cxx",
  "cxx-build",
  "lunar_assets",
+ "lunar_audio",
  "lunar_core",
  "lunar_math",
  "lunar_physics2d",

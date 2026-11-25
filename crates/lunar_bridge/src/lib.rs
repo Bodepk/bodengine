@@ -11,6 +11,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use lunar_assets::{ImageHandle, ImageStore};
+use lunar_audio::{AudioHandle, AudioPlayer, AudioStore, SoundHandle};
 use lunar_core::{
     Engine as CoreEngine, EngineConfig as CoreEngineConfig, InputState, Key, ManualClock,
     SystemClock, Tick,
@@ -43,6 +44,12 @@ pub struct Engine {
     images: ImageStore,
     image_ids: HashMap<u64, ImageHandle>,
     next_image: u64,
+    sounds: AudioStore,
+    sound_ids: HashMap<u64, SoundHandle>,
+    next_sound: u64,
+    player: AudioPlayer,
+    plays: HashMap<u64, AudioHandle>,
+    next_play: u64,
     scene: Option<Scene>,
     sprites: Vec<SpriteDef>,
     sprite_ids: HashMap<u64, usize>,
@@ -499,6 +506,72 @@ impl Engine {
         info
     }
 
+    fn load_sound(&mut self, asset: &str) -> u64 {
+        let Some(path) = safe_asset_path(&self.assets_dir, asset) else {
+            return 0;
+        };
+        let Ok(handle) = self.sounds.load_from_path(path) else {
+            return 0;
+        };
+        let public_id = self.next_sound;
+        self.next_sound += 1;
+        self.sound_ids.insert(public_id, handle);
+        public_id
+    }
+
+    fn play_sound(&mut self, sound: u64) -> u64 {
+        let Some(handle) = self.sound_ids.get(&sound).copied() else {
+            return 0;
+        };
+        let Some(data) = self.sounds.get(handle) else {
+            return 0;
+        };
+        let Ok(handle) = self.player.play(data) else {
+            return 0;
+        };
+        let public_id = self.next_play;
+        self.next_play += 1;
+        self.plays.insert(public_id, handle);
+        public_id
+    }
+
+    fn stop_sound(&mut self, play: u64) -> bool {
+        let Some(handle) = self.plays.get(&play).copied() else {
+            return false;
+        };
+        let stopped = self.player.stop(handle);
+        if stopped {
+            self.plays.remove(&play);
+        }
+        stopped
+    }
+
+    fn stop_all_sounds(&mut self) {
+        self.player.stop_all();
+        self.plays.clear();
+    }
+
+    fn set_volume(&mut self, play: u64, volume: f32) -> bool {
+        let Some(handle) = self.plays.get(&play).copied() else {
+            return false;
+        };
+        self.player.set_volume(handle, volume).is_ok()
+    }
+
+    fn set_master_volume(&mut self, volume: f32) {
+        self.player.set_master_volume(volume);
+    }
+
+    fn master_volume(&self) -> f32 {
+        self.player.master_volume()
+    }
+
+    fn is_sound_playing(&self, play: u64) -> bool {
+        self.plays
+            .get(&play)
+            .is_some_and(|handle| self.player.is_playing(*handle))
+    }
+
     fn load_image(&mut self, asset: &str) -> u64 {
         let Some(path) = safe_asset_path(&self.assets_dir, asset) else {
             return 0;
@@ -650,6 +723,12 @@ fn new_with_config(config: CoreEngineConfig, assets_dir: PathBuf) -> Box<Engine>
         images: ImageStore::new(),
         image_ids: HashMap::new(),
         next_image: 1,
+        sounds: AudioStore::new(),
+        sound_ids: HashMap::new(),
+        next_sound: 1,
+        player: AudioPlayer::new(),
+        plays: HashMap::new(),
+        next_play: 1,
         scene: None,
         sprites: Vec::new(),
         sprite_ids: HashMap::new(),
@@ -891,6 +970,14 @@ mod ffi {
         fn load_scene(self: &mut Engine, path: &str) -> bool;
         fn entity_count(self: &Engine) -> u32;
         fn entity(self: &Engine, index: u32) -> EntityInfo;
+        fn load_sound(self: &mut Engine, asset: &str) -> u64;
+        fn play_sound(self: &mut Engine, sound: u64) -> u64;
+        fn stop_sound(self: &mut Engine, play: u64) -> bool;
+        fn stop_all_sounds(self: &mut Engine);
+        fn set_volume(self: &mut Engine, play: u64, volume: f32) -> bool;
+        fn set_master_volume(self: &mut Engine, volume: f32);
+        fn master_volume(self: &Engine) -> f32;
+        fn is_sound_playing(self: &Engine, play: u64) -> bool;
         fn load_image(self: &mut Engine, asset: &str) -> u64;
         fn define_sprite(self: &mut Engine, image: u64, frame_width: u32, frame_height: u32)
         -> u64;
@@ -919,6 +1006,18 @@ mod tests {
             height: 540,
             assets_dir: Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../examples/sprite_platformer/assets")
+                .to_string_lossy()
+                .into_owned(),
+        }
+    }
+
+    fn audio_game_config() -> ffi::GameConfig {
+        ffi::GameConfig {
+            title: "audio".to_owned(),
+            width: 960,
+            height: 540,
+            assets_dir: Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/scene_demo/assets")
                 .to_string_lossy()
                 .into_owned(),
         }
@@ -1099,6 +1198,32 @@ mod tests {
             sprite: 999,
             ..Default::default()
         }]));
+    }
+
+    #[test]
+    fn sounds_load_without_a_device_and_handles_are_validated() {
+        let mut engine = new_game_engine(audio_game_config());
+        let sound = engine.load_sound("beep.wav");
+        assert_ne!(sound, 0);
+        assert_eq!(engine.load_sound("../../secret.wav"), 0);
+        assert_eq!(engine.load_sound("/etc/passwd"), 0);
+
+        // No abrimos dispositivo: los handles de reproducción inválidos se
+        // rechazan antes de llamar a `rodio`.
+        assert_eq!(engine.play_sound(999), 0);
+        assert!(!engine.stop_sound(999));
+        assert!(!engine.set_volume(999, 0.5));
+        assert!(!engine.is_sound_playing(999));
+        engine.stop_all_sounds();
+    }
+
+    #[test]
+    fn master_volume_is_exposed_without_a_device() {
+        let mut engine = new_engine(config());
+        engine.set_master_volume(0.4);
+        assert!((engine.master_volume() - 0.4).abs() < f32::EPSILON);
+        engine.set_master_volume(2.0);
+        assert!((engine.master_volume() - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]
