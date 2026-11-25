@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H11 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020) y un plataformas 2D jugable con sprites (ADR-018). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H12 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018) y scripting C++ de primera clase con el plataformas portado a C++ (ADR-021). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -47,10 +47,11 @@ crates/
   lunar_scenes      Escenas JSON versionadas y validación sin GPU
   lunar_editor      Núcleo de edición headless: comandos, selección y undo/redo
   lunar_editor_ui   GUI opcional con egui: vista 2D, assets, jerarquía e inspector
-  lunar_bridge      Frontera cxx / API C++
+  lunar_bridge      Frontera cxx / API C++ con servicios 2D y bucle para juegos C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
 examples/cpp_smoke     Smoke C++ de la bridge cxx (CMake)
+examples/cpp_platformer  Plataformas 2D canónico: lógica en C++, motor en Rust
 examples/scene_demo    Demo jugable: JSON, glTF, PNG, WAV y editor headless
 examples/sprite_platformer  Plataformas 2D: sprites, física Rapier y cámara
 docs/adr           Decisiones arquitectónicas
@@ -59,7 +60,7 @@ tests/fixtures     Datos de prueba sin GPU
 
 ## Features
 
-`default` activa `dim2`, `dim3`, `assets`, `gltf`, `audio`, `scenes`, `bridge` y `runtime`; el editor queda fuera por decisión de ADR-007/015 y se activa con `--features editor`. La interfaz gráfica es aún más opcional: `--features editor_ui` implica `editor` y añade `lunar_editor_ui` con `egui`/`eframe`. `gltf` implica `assets`, pero `assets` no implica `gltf`. Los builds parciales:
+`default` activa `dim2`, `dim3`, `assets`, `gltf`, `audio`, `scenes`, `bridge` y `runtime`; el editor queda fuera por decisión de ADR-007/015 y se activa con `--features editor`. La interfaz gráfica es aún más opcional: `--features editor_ui` implica `editor` y añade `lunar_editor_ui` con `egui`/`eframe`. `gltf` implica `assets`, pero `assets` no implica `gltf`. La bridge C++ incorpora los servicios 2D (física, assets, escenas y render) sin feature nueva, así que `bridge` y `default` los arrastran; `dim2`, `dim3` y el build sin features siguen sin incluir la bridge. Los builds parciales:
 
 ```bash
 cargo build -p lunar --no-default-features --features dim2
@@ -89,6 +90,16 @@ El editor gráfico (ADR-019 y ADR-020) muestra una vista 2D con rejilla opcional
 No hay diálogo nativo de carpetas (`rfd` no está en el stack) ni render propio: el preview usa `egui::TextureHandle` y la GUI no usa `lunar_render` ni expone `wgpu`. Toda mutación pasa por `EditorDocument::apply`, con deshacer/rehacer y guardado JSON v1. Atajos: `Ctrl+S`, `Ctrl+Z`, `Ctrl+Shift+Z`/`Ctrl+Y`, `Ctrl+D` y `Supr`.
 
 El plataformas (ADR-018) abre una ventana 960×540 y consume `examples/sprite_platformer/assets/platformer.scene.json`. `A`/`D` o las flechas mueven, `W`/`ArrowUp` salta y `Escape` sale; recoger manzanas y llegar a la meta se informa por stdout. Usa sprites CC0 de Pixel Adventure 1, con procedencia en `assets/ASSETS.md`. `lunar_render` dibuja hojas de sprites mediante `SpriteId`/`SpriteDraw` sin exponer tipos `wgpu` nuevos.
+
+La versión canónica de ese plataformas es la de **C++** (ADR-021): `examples/cpp_platformer` enlaza la staticlib de `lunar_bridge`, hereda de la clase `Game` y concentra en C++ todo el estado, el input, la animación, el AABB de manzanas/meta y la cámara. Rust conserva la ventana, el reloj de 60 Hz, Rapier, la decodificación PNG, el parseo JSON y `Renderer`: C++ solo emite órdenes `SpriteDrawCpp`, sin ver `wgpu`. El ejecutable Rust `sprite_platformer` se mantiene como banco de pruebas de la API Rust.
+
+```bash
+cmake -S examples/cpp_platformer -B build/cpp_platformer
+cmake --build build/cpp_platformer --config Release
+build/cpp_platformer/Release/cpp_platformer.exe            # Windows; abre ventana
+build/cpp_platformer/Release/cpp_platformer.exe --headless # verificación determinista
+# build/cpp_platformer/cpp_platformer                      # Linux/macOS
+```
 
 La demo abre una ventana 800×600 y consume `examples/scene_demo/assets/demo.scene.json`: lee el glTF, toma el color del PNG, reproduce el WAV con el volumen de la escena y muestra el editor headless. WASD mueve el triángulo, `W` reproduce el sonido, `S` lo detiene, `↑` renombra la entidad, `↓` deshace, `←` rehace y `Esc` cierra. Para regenerar los assets sintéticos:
 
@@ -122,5 +133,6 @@ build/cpp_smoke/Release/cpp_smoke.exe   # Windows
 | H9 | Escenas JSON versionadas (`serde`/`serde_json`, jerarquía validada) | ✅ |
 | H10 | Editor headless (`lunar_editor`, comandos y undo/redo) | ✅ |
 | H11 | Pulido multiplataforma (rutas, guardado y gates por SO) | ✅ |
+| H12 | Scripting C++ y plataformas portado a C++ (ADR-021) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).

@@ -13,6 +13,8 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Sprites CC0 de Pixel Adventure 1 copiados al ejemplo con nombres descriptivos y procedencia en `assets/ASSETS.md`.
 - Editor visual en `lunar_editor_ui` (ADR-020): panel de assets con ruta configurable y recarga recursiva, texturas `egui` de PNG/JPEG, lienzo 2D con rejilla, zoom/paneo, selección múltiple, arrastre de assets, gizmos de escala/rotación y jerarquía reordenable o reparentable por arrastre.
 - Comandos `MoveEntity` y `DuplicateEntity` en `lunar_editor`, validados y deshechos como los demás; `Ctrl+D` duplica la selección en la GUI.
+- API C++ de primera clase en `lunar_bridge` (ADR-021): clase abstracta `Game`, bucle de ventana gestionado por Rust, servicios de input, escenas, imágenes, física 2D y viewport, y órdenes de dibujo `SpriteDrawCpp` que Rust convierte en `SpriteDraw`.
+- Ejemplo `examples/cpp_platformer`: el plataformas canónico con toda la lógica de juego en C++ y los mismos assets y escena v1; modo `--headless` para verificación determinista.
 
 ### Seguridad y compatibilidad
 
@@ -24,6 +26,9 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - La GUI no usa `lunar_render` ni expone `wgpu`; `editor_ui` sigue fuera de `default` y `eframe` sin backend `glow`.
 - No se añaden dependencias externas: `lunar_editor_ui` solo incorpora el crate interno `lunar_assets`, sin `rfd` ni diálogo nativo.
 - El esquema JSON permanece en versión 1 y `Component::Image` no gana campos de animación; el editor previewa la imagen completa.
+- La bridge C++ no expone `Renderer`, `Surface`, `ImageData`, escenas enteras ni Rapier por valor: solo handles, structs POD y órdenes de dibujo; `wgpu` sigue fuera de la API pública.
+- `lunar_bridge` no añade features ni dependencias externas; `bridge` y `default` pasan a incluir servicios 2D, mientras `dim2`, `dim3` y el build sin features siguen sin arrastrar la bridge.
+- El plataformas Rust se conserva como banco de pruebas sin `lunar_bridge`; CI verifica por separado el árbol de la bridge y ejecuta el juego C++ en modo headless en Linux, Windows y macOS.
 
 ## [0.1.0] — 2026-11-24
 

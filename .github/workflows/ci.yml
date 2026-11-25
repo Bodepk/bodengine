@@ -41,6 +41,18 @@ jobs:
           else
             build/cpp_smoke/cpp_smoke
           fi
+      - name: Configure C++ platformer
+        run: cmake -S examples/cpp_platformer -B build/cpp_platformer
+      - name: Build C++ platformer
+        run: cmake --build build/cpp_platformer --config Release
+      - name: Run C++ platformer logic (headless)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            build/cpp_platformer/Release/cpp_platformer.exe --headless
+          else
+            build/cpp_platformer/cpp_platformer --headless
+          fi
 
   feature-gates:
     name: 2D-only / 3D-only dependency gates
@@ -177,6 +189,17 @@ jobs:
           ! grep -q 'lunar_editor' tree-platformer.txt
           ! grep -q 'egui v' tree-platformer.txt
           ! grep -q 'eframe v' tree-platformer.txt
+      - name: Bridge tree exposes 2D services but no GUI
+        shell: bash
+        run: |
+          cargo tree -e features -p lunar_bridge > tree-bridge.txt
+          grep -q 'lunar_render v' tree-bridge.txt
+          grep -q 'rapier2d' tree-bridge.txt
+          grep -q 'lunar_assets v' tree-bridge.txt
+          grep -q 'lunar_scenes v' tree-bridge.txt
+          ! grep -q 'egui v' tree-bridge.txt
+          ! grep -q 'eframe v' tree-bridge.txt
+          ! grep -q 'lunar_editor_ui' tree-bridge.txt
       - name: Partial builds compile
         shell: bash
         run: |
