@@ -33,9 +33,30 @@ int main() {
         return 1;
     }
 
-    FrameStats stats;
-    // El primer frame ancla el reloj; los 60 siguientes producen un tick cada uno.
-    for (int frame = 0; frame < 61; ++frame) {
+    engine->press_mouse(static_cast<std::uint32_t>(lunar::MouseButtonCode::Left), true);
+    engine->set_cursor(320.0, 240.0);
+    engine->add_scroll(0.0, 1.0, false);
+
+    // El primer frame ancla el reloj y preserva el estado de ratón del evento.
+    FrameStats stats = engine->tick(kFixedDtNs);
+    const MouseButtonState mouse = engine->mouse_state(
+        static_cast<std::uint32_t>(lunar::MouseButtonCode::Left));
+    if (!mouse.down || !mouse.pressed) {
+        std::cerr << "el estado del ratón no llegó al frame\n";
+        return 1;
+    }
+    const CursorPoint ndc = engine->cursor_ndc();
+    if (!ndc.valid || ndc.x != 0.0f || ndc.y != 0.0f) {
+        std::cerr << "la conversión de cursor a NDC falló\n";
+        return 1;
+    }
+    if (!engine->scroll_delta().valid) {
+        std::cerr << "el scroll del frame no llegó a C++\n";
+        return 1;
+    }
+
+    // Los 60 frames siguientes producen un tick cada uno.
+    for (int frame = 1; frame < 61; ++frame) {
         stats = engine->tick(kFixedDtNs);
     }
 

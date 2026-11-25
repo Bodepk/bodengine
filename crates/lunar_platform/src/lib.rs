@@ -7,7 +7,7 @@ use lunar_core::Key;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::error::EventLoopError;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -50,9 +50,40 @@ pub trait PlatformApp {
     /// Un frame listo para simular/renderizar. Devuelve `false` para salir.
     fn on_frame(&mut self) -> bool;
 
+    /// Botón de ratón pulsado o liberado; el código sigue a `MouseButtonCode` (ADR-023).
+    fn on_mouse_button(&mut self, _button: u32, _pressed: bool) {}
+
+    /// Cursor en píxeles físicos relativos a la esquina superior izquierda.
+    fn on_cursor(&mut self, _x: f64, _y: f64) {}
+
+    /// Scroll acumulado del evento. `pixels` distingue `PixelDelta` de `LineDelta`.
+    fn on_scroll(&mut self, _x: f32, _y: f32, _pixels: bool) {}
+
     /// Actualiza el render justo antes de presentar el frame (ADR-017).
     #[cfg(feature = "render")]
     fn on_render(&mut self, _renderer: &mut lunar_render::Renderer<'_>) {}
+}
+
+/// Traduce un botón de ratón a un código POD compartido con C++ (ADR-023).
+#[must_use]
+pub fn map_mouse_button(button: MouseButton) -> u32 {
+    match button {
+        MouseButton::Left => 1,
+        MouseButton::Right => 2,
+        MouseButton::Middle => 3,
+        MouseButton::Back => 4,
+        MouseButton::Forward => 5,
+        MouseButton::Other(_) => 0,
+    }
+}
+
+/// Normaliza una rueda de ratón a dos componentes finitas y una unidad.
+fn map_scroll(delta: MouseScrollDelta) -> Option<(f32, f32, bool)> {
+    let (x, y, pixels) = match delta {
+        MouseScrollDelta::LineDelta(x, y) => (x, y, false),
+        MouseScrollDelta::PixelDelta(position) => (position.x as f32, position.y as f32, true),
+    };
+    (x.is_finite() && y.is_finite()).then_some((x, y, pixels))
 }
 
 /// Traduce una tecla física de winit a una tecla del motor.
@@ -111,6 +142,20 @@ fn create_renderer(
 /// legítimo de minimizado y la capa de render decide omitirlo.
 fn forward_resize(app: &mut impl PlatformApp, width: u32, height: u32) {
     app.on_resize(width, height);
+}
+
+fn forward_mouse_button(app: &mut impl PlatformApp, button: MouseButton, pressed: bool) {
+    app.on_mouse_button(map_mouse_button(button), pressed);
+}
+
+fn forward_cursor(app: &mut impl PlatformApp, x: f64, y: f64) {
+    app.on_cursor(x, y);
+}
+
+fn forward_scroll(app: &mut impl PlatformApp, delta: MouseScrollDelta) {
+    if let Some((x, y, pixels)) = map_scroll(delta) {
+        app.on_scroll(x, y, pixels);
+    }
 }
 
 struct WinitHost<'a, A: PlatformApp> {
@@ -176,6 +221,15 @@ impl<A: PlatformApp> ApplicationHandler for WinitHost<'_, A> {
                 }
                 forward_resize(self.app, size.width, size.height);
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                forward_cursor(self.app, position.x, position.y);
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                forward_mouse_button(self.app, button, matches!(state, ElementState::Pressed));
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                forward_scroll(self.app, delta);
+            }
             WindowEvent::RedrawRequested => {
                 if !self.app.on_frame() {
                     event_loop.exit();
@@ -224,15 +278,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn maps_mouse_buttons_and_scroll_deltas() {
+        assert_eq!(map_mouse_button(MouseButton::Left), 1);
+        assert_eq!(map_mouse_button(MouseButton::Right), 2);
+        assert_eq!(map_mouse_button(MouseButton::Middle), 3);
+        assert_eq!(map_mouse_button(MouseButton::Back), 4);
+        assert_eq!(map_mouse_button(MouseButton::Forward), 5);
+        assert_eq!(map_mouse_button(MouseButton::Other(7)), 0);
+        assert_eq!(
+            map_scroll(MouseScrollDelta::LineDelta(1.0, -2.0)),
+            Some((1.0, -2.0, false))
+        );
+        assert_eq!(
+            map_scroll(MouseScrollDelta::PixelDelta(
+                winit::dpi::PhysicalPosition::new(4.0, 5.0)
+            )),
+            Some((4.0, 5.0, true))
+        );
+        assert_eq!(map_scroll(MouseScrollDelta::LineDelta(f32::NAN, 1.0)), None);
+    }
+
     #[derive(Default)]
     struct RecordingApp {
         resizes: Vec<(u32, u32)>,
+        buttons: Vec<(u32, bool)>,
+        cursor: Vec<(f64, f64)>,
+        scroll: Vec<(f32, f32, bool)>,
     }
 
     impl PlatformApp for RecordingApp {
         fn on_key(&mut self, _key: Key, _pressed: bool) {}
         fn on_resize(&mut self, width: u32, height: u32) {
             self.resizes.push((width, height));
+        }
+        fn on_mouse_button(&mut self, button: u32, pressed: bool) {
+            self.buttons.push((button, pressed));
+        }
+        fn on_cursor(&mut self, x: f64, y: f64) {
+            self.cursor.push((x, y));
+        }
+        fn on_scroll(&mut self, x: f32, y: f32, pixels: bool) {
+            self.scroll.push((x, y, pixels));
         }
         fn on_frame(&mut self) -> bool {
             true
@@ -253,5 +340,21 @@ mod tests {
         forward_resize(&mut app, 0, 1);
         forward_resize(&mut app, 800, 600);
         assert_eq!(app.resizes, [(0, 0), (0, 1), (800, 600)]);
+    }
+
+    #[test]
+    fn mouse_events_are_forwarded_as_pod_values() {
+        let mut app = RecordingApp::default();
+        forward_mouse_button(&mut app, MouseButton::Left, true);
+        forward_cursor(&mut app, 120.0, 240.0);
+        forward_scroll(&mut app, MouseScrollDelta::LineDelta(0.0, 3.0));
+        forward_scroll(
+            &mut app,
+            MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(8.0, 9.0)),
+        );
+
+        assert_eq!(app.buttons, [(1, true)]);
+        assert_eq!(app.cursor, [(120.0, 240.0)]);
+        assert_eq!(app.scroll, [(0.0, 3.0, false), (8.0, 9.0, true)]);
     }
 }

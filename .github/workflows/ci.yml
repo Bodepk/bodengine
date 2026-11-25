@@ -62,6 +62,7 @@ jobs:
       - name: Configure and build external C++ SDK template
         shell: bash
         run: |
+          grep -q 'mouse_state' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           cmake -S examples/cpp_sdk_template -B build/cpp_sdk_template \
             -DCMAKE_PREFIX_PATH="$PWD/build/sdk-prefix"
           cmake --build build/cpp_sdk_template --config Release

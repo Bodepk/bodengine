@@ -4,7 +4,7 @@
 //! ventana, el reloj, la física y el render, y C++ solo entrega órdenes de
 //! dibujo. Ningún tipo de `wgpu`, `Renderer` o Rapier cruza esta frontera.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
@@ -30,6 +30,8 @@ pub struct Engine {
     manual_clock: ManualClock,
     system_clock: SystemClock,
     input_snapshot: InputState,
+    mouse: MouseState,
+    mouse_snapshot: MouseSnapshot,
     last_tick: Tick,
     physics: PhysicsWorld2D,
     bodies: HashMap<u64, BodyId>,
@@ -63,6 +65,55 @@ struct PendingDraw {
     flip_x: bool,
     center: [f32; 2],
     size: [f32; 2],
+}
+
+#[derive(Default)]
+struct MouseState {
+    down: HashSet<u32>,
+    just_pressed: HashSet<u32>,
+    just_released: HashSet<u32>,
+    cursor_x: f64,
+    cursor_y: f64,
+    cursor_valid: bool,
+    scroll_x: f32,
+    scroll_y: f32,
+    scroll_pixels: bool,
+    scroll_pending: bool,
+}
+
+impl MouseState {
+    fn snapshot(&self) -> MouseSnapshot {
+        MouseSnapshot {
+            pressed: self.just_pressed.clone(),
+            released: self.just_released.clone(),
+            scroll_x: self.scroll_x,
+            scroll_y: self.scroll_y,
+            scroll_pixels: self.scroll_pixels,
+            scroll_pending: self.scroll_pending,
+        }
+    }
+
+    fn end_frame(&mut self) {
+        self.just_pressed.clear();
+        self.just_released.clear();
+        self.scroll_pending = false;
+        self.scroll_x = 0.0;
+        self.scroll_y = 0.0;
+    }
+}
+
+#[derive(Default)]
+struct MouseSnapshot {
+    pressed: HashSet<u32>,
+    released: HashSet<u32>,
+    scroll_x: f32,
+    scroll_y: f32,
+    scroll_pixels: bool,
+    scroll_pending: bool,
+}
+
+fn is_mouse_button(button: u32) -> bool {
+    (1..=5).contains(&button)
 }
 
 fn empty_tick() -> Tick {
@@ -163,6 +214,8 @@ impl Engine {
     /// Avanza el reloj inyectado y devuelve el resultado del frame.
     fn tick(&mut self, elapsed_ns: u64) -> ffi::FrameStats {
         self.input_snapshot = self.inner.input().clone();
+        self.mouse_snapshot = self.mouse.snapshot();
+        self.mouse.end_frame();
         self.manual_clock
             .advance(std::time::Duration::from_nanos(elapsed_ns));
         self.last_tick = self.inner.update(&self.manual_clock);
@@ -172,6 +225,8 @@ impl Engine {
     /// Avanza con el reloj del sistema; el host lo llama una vez por frame.
     fn tick_system(&mut self) -> ffi::FrameStats {
         self.input_snapshot = self.inner.input().clone();
+        self.mouse_snapshot = self.mouse.snapshot();
+        self.mouse.end_frame();
         self.last_tick = self.inner.update(&self.system_clock);
         self.stats()
     }
@@ -195,6 +250,90 @@ impl Engine {
     /// Consulta la pulsación del frame, preservada antes de `Engine::update`.
     fn was_key_pressed(&self, code: u32) -> bool {
         from_key_code(code).is_some_and(|key| self.input_snapshot.was_pressed(key))
+    }
+
+    fn mouse_state(&self, button: u32) -> ffi::MouseButtonState {
+        ffi::MouseButtonState {
+            down: is_mouse_button(button) && self.mouse.down.contains(&button),
+            pressed: self.mouse_snapshot.pressed.contains(&button),
+            released: self.mouse_snapshot.released.contains(&button),
+        }
+    }
+
+    fn press_mouse(&mut self, button: u32, pressed: bool) {
+        if !is_mouse_button(button) {
+            return;
+        }
+        if pressed {
+            if self.mouse.down.insert(button) {
+                self.mouse.just_pressed.insert(button);
+            }
+        } else if self.mouse.down.remove(&button) {
+            self.mouse.just_released.insert(button);
+        }
+    }
+
+    fn set_cursor(&mut self, x: f64, y: f64) {
+        if x.is_finite() && y.is_finite() {
+            self.mouse.cursor_x = x;
+            self.mouse.cursor_y = y;
+            self.mouse.cursor_valid = true;
+        }
+    }
+
+    fn cursor_position(&self) -> ffi::CursorPoint {
+        ffi::CursorPoint {
+            x: self.mouse.cursor_x as f32,
+            y: self.mouse.cursor_y as f32,
+            valid: self.mouse.cursor_valid,
+        }
+    }
+
+    fn cursor_ndc(&self) -> ffi::CursorPoint {
+        if !self.mouse.cursor_valid {
+            return ffi::CursorPoint::default();
+        }
+        self.to_ndc(self.mouse.cursor_x as f32, self.mouse.cursor_y as f32)
+    }
+
+    fn screen_to_ndc(&self, x: f32, y: f32) -> ffi::CursorPoint {
+        self.to_ndc(x, y)
+    }
+
+    fn to_ndc(&self, x: f32, y: f32) -> ffi::CursorPoint {
+        let width = self.viewport.width;
+        let height = self.viewport.height;
+        if width == 0 || height == 0 || !x.is_finite() || !y.is_finite() {
+            return ffi::CursorPoint::default();
+        }
+        ffi::CursorPoint {
+            x: x / width as f32 * 2.0 - 1.0,
+            y: 1.0 - y / height as f32 * 2.0,
+            valid: true,
+        }
+    }
+
+    fn add_scroll(&mut self, x: f32, y: f32, pixels: bool) {
+        if !x.is_finite() || !y.is_finite() {
+            return;
+        }
+        if !self.mouse.scroll_pending || self.mouse.scroll_pixels != pixels {
+            self.mouse.scroll_x = 0.0;
+            self.mouse.scroll_y = 0.0;
+            self.mouse.scroll_pixels = pixels;
+        }
+        self.mouse.scroll_x += x;
+        self.mouse.scroll_y += y;
+        self.mouse.scroll_pending = true;
+    }
+
+    fn scroll_delta(&self) -> ffi::ScrollDelta {
+        ffi::ScrollDelta {
+            x: self.mouse_snapshot.scroll_x,
+            y: self.mouse_snapshot.scroll_y,
+            pixels: self.mouse_snapshot.scroll_pixels,
+            valid: self.mouse_snapshot.scroll_pending,
+        }
     }
 
     fn set_gravity(&mut self, x: f32, y: f32) {
@@ -498,6 +637,8 @@ fn new_with_config(config: CoreEngineConfig, assets_dir: PathBuf) -> Box<Engine>
         manual_clock: ManualClock::default(),
         system_clock: SystemClock::new(),
         input_snapshot: InputState::default(),
+        mouse: MouseState::default(),
+        mouse_snapshot: MouseSnapshot::default(),
         last_tick: empty_tick(),
         physics: PhysicsWorld2D::new(Vec2::new(0.0, -9.81)),
         bodies: HashMap::new(),
@@ -533,6 +674,21 @@ impl PlatformApp for Host<'_> {
         }
         self.engine.press_key(code, pressed);
         self.game.as_mut().on_key(code, pressed);
+    }
+
+    fn on_mouse_button(&mut self, button: u32, pressed: bool) {
+        self.engine.press_mouse(button, pressed);
+        self.game.as_mut().on_mouse(button, pressed);
+    }
+
+    fn on_cursor(&mut self, x: f64, y: f64) {
+        self.engine.set_cursor(x, y);
+        self.game.as_mut().on_cursor(x, y);
+    }
+
+    fn on_scroll(&mut self, x: f32, y: f32, pixels: bool) {
+        self.engine.add_scroll(x, y, pixels);
+        self.game.as_mut().on_scroll(x, y, pixels);
     }
 
     fn on_resize(&mut self, width: u32, height: u32) {
@@ -603,6 +759,31 @@ mod ffi {
         height: u32,
     }
 
+    /// Estado de un botón de ratón en el frame (ADR-023).
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct MouseButtonState {
+        down: bool,
+        pressed: bool,
+        released: bool,
+    }
+
+    /// Punto en píxeles físicos o en NDC; `valid=false` si no se puede convertir.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct CursorPoint {
+        x: f32,
+        y: f32,
+        valid: bool,
+    }
+
+    /// Scroll acumulado en el frame; `pixels` distingue la unidad del evento.
+    #[derive(Debug, Default, Clone, Copy, PartialEq)]
+    struct ScrollDelta {
+        x: f32,
+        y: f32,
+        pixels: bool,
+        valid: bool,
+    }
+
     /// Datos POD de una entidad de la escena v1.
     #[derive(Debug, Default, Clone, PartialEq)]
     struct EntityInfo {
@@ -654,6 +835,9 @@ mod ffi {
         type Game;
 
         fn on_key(self: Pin<&mut Game>, code: u32, pressed: bool);
+        fn on_mouse(self: Pin<&mut Game>, button: u32, pressed: bool);
+        fn on_cursor(self: Pin<&mut Game>, x: f64, y: f64);
+        fn on_scroll(self: Pin<&mut Game>, x: f32, y: f32, pixels: bool);
         fn on_resize(self: Pin<&mut Game>, width: u32, height: u32);
         fn on_frame(self: Pin<&mut Game>) -> bool;
         fn on_render(self: Pin<&mut Game>);
@@ -679,6 +863,15 @@ mod ffi {
         fn press_key(self: &mut Engine, code: u32, pressed: bool);
         fn is_key_down(self: &Engine, code: u32) -> bool;
         fn was_key_pressed(self: &Engine, code: u32) -> bool;
+
+        fn mouse_state(self: &Engine, button: u32) -> MouseButtonState;
+        fn press_mouse(self: &mut Engine, button: u32, pressed: bool);
+        fn set_cursor(self: &mut Engine, x: f64, y: f64);
+        fn cursor_position(self: &Engine) -> CursorPoint;
+        fn cursor_ndc(self: &Engine) -> CursorPoint;
+        fn screen_to_ndc(self: &Engine, x: f32, y: f32) -> CursorPoint;
+        fn add_scroll(self: &mut Engine, x: f32, y: f32, pixels: bool);
+        fn scroll_delta(self: &Engine) -> ScrollDelta;
 
         fn set_gravity(self: &mut Engine, x: f32, y: f32);
         fn add_body(self: &mut Engine, kind: u8, x: f32, y: f32) -> u64;
@@ -786,6 +979,65 @@ mod tests {
         assert!(engine.was_key_pressed(2));
         engine.tick_system();
         assert!(!engine.was_key_pressed(2));
+    }
+
+    #[test]
+    fn mouse_state_and_scroll_survive_one_tick() {
+        let mut engine = new_engine(config());
+        engine.press_mouse(0, true);
+        engine.press_mouse(1, true);
+        engine.set_cursor(400.0, 300.0);
+        engine.add_scroll(1.0, -2.0, false);
+
+        assert!(!engine.mouse_state(0).down);
+        let position = engine.cursor_position();
+        assert!(position.valid);
+        assert!((position.x - 400.0).abs() < f32::EPSILON);
+        assert!((position.y - 300.0).abs() < f32::EPSILON);
+
+        engine.tick(FIXED_DT.as_nanos() as u64);
+        let state = engine.mouse_state(1);
+        assert!(state.down && state.pressed && !state.released);
+        let scroll = engine.scroll_delta();
+        assert!(scroll.valid && !scroll.pixels);
+        assert!((scroll.x - 1.0).abs() < f32::EPSILON);
+        assert!((scroll.y + 2.0).abs() < f32::EPSILON);
+
+        engine.tick(FIXED_DT.as_nanos() as u64);
+        assert!(!engine.mouse_state(1).pressed);
+        assert!(!engine.scroll_delta().valid);
+
+        engine.press_mouse(1, false);
+        engine.tick(FIXED_DT.as_nanos() as u64);
+        assert!(engine.mouse_state(1).released);
+        assert!(!engine.mouse_state(1).down);
+    }
+
+    #[test]
+    fn screen_to_ndc_uses_the_current_viewport() {
+        let mut engine = new_engine(config());
+        let center = engine.screen_to_ndc(400.0, 300.0);
+        assert!(center.valid);
+        assert!((center.x).abs() < f32::EPSILON);
+        assert!((center.y).abs() < f32::EPSILON);
+
+        let corner = engine.screen_to_ndc(0.0, 0.0);
+        assert!((corner.x + 1.0).abs() < f32::EPSILON);
+        assert!((corner.y - 1.0).abs() < f32::EPSILON);
+
+        engine.set_cursor(200.0, 150.0);
+        let cursor = engine.cursor_ndc();
+        assert!(cursor.valid);
+        assert!((cursor.x + 0.5).abs() < f32::EPSILON);
+        assert!((cursor.y - 0.5).abs() < f32::EPSILON);
+
+        engine.viewport = ffi::ViewportInfo {
+            width: 0,
+            height: 0,
+        };
+        assert!(!engine.screen_to_ndc(1.0, 1.0).valid);
+        assert!(!engine.cursor_ndc().valid);
+        assert!(!engine.screen_to_ndc(f32::NAN, 1.0).valid);
     }
 
     #[test]

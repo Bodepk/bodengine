@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H13 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021) y un SDK C++ instalable con `find_package` (ADR-022). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H14 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022) e input de ratón, scroll y conversión de viewport en C++ (ADR-023). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -132,6 +132,8 @@ build/cpp_sdk_template/Release/cpp_sdk_template.exe  # Windows
 
 La versión del paquete es `0.1.0` y se solicita con `EXACT`: antes de 1.0, un cambio de versión puede romper la ABI C++. La configuración propaga las librerías del sistema que la staticlib Rust no declara por sí sola.
 
+La API C++ también expone ratón, scroll y coordenadas de viewport (ADR-023): `mouse_state`, `cursor_position`, `cursor_ndc`, `screen_to_ndc` y `scroll_delta` son aditivos; `Game` ofrece `on_mouse`, `on_cursor` y `on_scroll` como virtuales opcionales. `winit` sigue confinado en `lunar_platform` y los píxeles físicos se convierten a NDC en Rust.
+
 ## Hitos
 
 | Hito | Contenido | Estado |
@@ -150,5 +152,6 @@ La versión del paquete es `0.1.0` y se solicita con `EXACT`: antes de 1.0, un c
 | H11 | Pulido multiplataforma (rutas, guardado y gates por SO) | ✅ |
 | H12 | Scripting C++ y plataformas portado a C++ (ADR-021) | ✅ |
 | H13 | SDK C++ instalable con `find_package` (ADR-022) | ✅ |
+| H14 | Input de ratón, scroll y viewport en C++ (ADR-023) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).
