@@ -156,7 +156,10 @@ jobs:
           grep -q 'egui v0.37.0' tree-editor-ui.txt
           grep -q 'eframe v0.37.0' tree-editor-ui.txt
           grep -q 'egui-wgpu v0.37.0' tree-editor-ui.txt
+          grep -q 'lunar_assets v' tree-editor-ui.txt
           ! grep -q 'eframe feature "glow"' tree-editor-ui.txt
+          ! grep -q 'lunar_render v' tree-editor-ui.txt
+          ! grep -q 'rfd v' tree-editor-ui.txt
       - name: Sprite platformer tree uses 2D, assets and scenes only
         shell: bash
         run: |

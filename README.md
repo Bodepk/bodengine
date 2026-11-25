@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H11 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con jerarquía e inspector (ADR-019) y un plataformas 2D jugable con sprites (ADR-018). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H11 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020) y un plataformas 2D jugable con sprites (ADR-018). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -46,7 +46,7 @@ crates/
   lunar_audio       Reproducción WAV con rodio y handles opacos
   lunar_scenes      Escenas JSON versionadas y validación sin GPU
   lunar_editor      Núcleo de edición headless: comandos, selección y undo/redo
-  lunar_editor_ui   GUI opcional con egui: jerarquía e inspector
+  lunar_editor_ui   GUI opcional con egui: vista 2D, assets, jerarquía e inspector
   lunar_bridge      Frontera cxx / API C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
@@ -80,11 +80,13 @@ cargo test --workspace
 cargo run -p minimal_game
 cargo run -p scene_demo
 cargo run -p sprite_platformer
-cargo run -p lunar_editor_ui                         # escena nueva vacía
+cargo run -p lunar_editor_ui                         # escena nueva; assets en examples/sprite_platformer/assets
 cargo run -p lunar_editor_ui -- ruta/a/scene.json    # abre un JSON existente
 ```
 
-El editor gráfico (ADR-019) muestra jerarquía, inspector de nombre/transformación/padre/componentes, deshacer y rehacer, y guardado JSON. Toda mutación pasa por `EditorDocument::apply`; el panel central es un diagrama de nodos, no una vista de juego ni un preview de sprites. Atajos: `Ctrl+S`, `Ctrl+Z`, `Ctrl+Shift+Z`/`Ctrl+Y` y `Supr`.
+El editor gráfico (ADR-019 y ADR-020) muestra una vista 2D con rejilla opcional, zoom anclado al puntero con la rueda, paneo con el botón central o derecho y selección múltiple con Shift/Ctrl+clic. El panel de assets escanea de forma recursiva la carpeta escrita en el campo de texto y se actualiza con «Recargar»: arrastra `.png`/`.jpg`/`.jpeg` al lienzo para crear entidades con su sprite; también se listan `.wav` y `.glb`/`.gltf`. Arrastra las entidades para moverlas; con una sola selección aparecen tiradores de escala uniforme y rotación. En la jerarquía, soltar sobre otra entidad cambia el padre, soltar entre filas reordena y soltar en el área raíz desaparenta; `Ctrl+D` duplica la selección.
+
+No hay diálogo nativo de carpetas (`rfd` no está en el stack) ni render propio: el preview usa `egui::TextureHandle` y la GUI no usa `lunar_render` ni expone `wgpu`. Toda mutación pasa por `EditorDocument::apply`, con deshacer/rehacer y guardado JSON v1. Atajos: `Ctrl+S`, `Ctrl+Z`, `Ctrl+Shift+Z`/`Ctrl+Y`, `Ctrl+D` y `Supr`.
 
 El plataformas (ADR-018) abre una ventana 960×540 y consume `examples/sprite_platformer/assets/platformer.scene.json`. `A`/`D` o las flechas mueven, `W`/`ArrowUp` salta y `Escape` sale; recoger manzanas y llegar a la meta se informa por stdout. Usa sprites CC0 de Pixel Adventure 1, con procedencia en `assets/ASSETS.md`. `lunar_render` dibuja hojas de sprites mediante `SpriteId`/`SpriteDraw` sin exponer tipos `wgpu` nuevos.
 

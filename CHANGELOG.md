@@ -11,6 +11,8 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Pipeline de sprites en `lunar_render`: `SpriteId`, `SpriteDraw` y `SpriteError`, con hojas de fotogramas, blending alfa y sampler `Nearest` (ADR-018).
 - Ejemplo `sprite_platformer`: plataformas 2D con física Rapier, animación del jugador, cámara, manzanas y meta, usando `platformer.scene.json`.
 - Sprites CC0 de Pixel Adventure 1 copiados al ejemplo con nombres descriptivos y procedencia en `assets/ASSETS.md`.
+- Editor visual en `lunar_editor_ui` (ADR-020): panel de assets con ruta configurable y recarga recursiva, texturas `egui` de PNG/JPEG, lienzo 2D con rejilla, zoom/paneo, selección múltiple, arrastre de assets, gizmos de escala/rotación y jerarquía reordenable o reparentable por arrastre.
+- Comandos `MoveEntity` y `DuplicateEntity` en `lunar_editor`, validados y deshechos como los demás; `Ctrl+D` duplica la selección en la GUI.
 
 ### Seguridad y compatibilidad
 
@@ -19,6 +21,9 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - La API de sprites no añade tipos `wgpu` públicos ni nuevas dependencias; `lunar_scenes` mantiene el esquema de versión 1.
 - El pipeline de sprites vive en `lunar_render`, detrás de la feature `render`; los builds sin render siguen sin incluirlo.
 - CI verifica que `sprite_platformer` arrastra solo `dim2`, `assets` y `scenes`, sin 3D, audio, bridge ni GUI.
+- La GUI no usa `lunar_render` ni expone `wgpu`; `editor_ui` sigue fuera de `default` y `eframe` sin backend `glow`.
+- No se añaden dependencias externas: `lunar_editor_ui` solo incorpora el crate interno `lunar_assets`, sin `rfd` ni diálogo nativo.
+- El esquema JSON permanece en versión 1 y `Component::Image` no gana campos de animación; el editor previewa la imagen completa.
 
 ## [0.1.0] — 2026-11-24
 
