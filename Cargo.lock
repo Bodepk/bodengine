@@ -1909,6 +1909,7 @@ dependencies = [
  "lunar_assets",
  "lunar_audio",
  "lunar_core",
+ "lunar_editor",
  "lunar_math",
  "lunar_physics2d",
  "lunar_physics3d",

@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H16 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024) y servicios 3D en C++ (ADR-025). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H17 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024), servicios 3D en C++ (ADR-025) y documentos de escena y recarga desde C++ (ADR-026). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -47,7 +47,7 @@ crates/
   lunar_scenes      Escenas JSON versionadas y validación sin GPU
   lunar_editor      Núcleo de edición headless: comandos, selección y undo/redo
   lunar_editor_ui   GUI opcional con egui: vista 2D, assets, jerarquía e inspector
-  lunar_bridge      Frontera cxx / API C++ con servicios 2D, 3D, audio y bucle para juegos C++
+  lunar_bridge      Frontera cxx / API C++ con servicios 2D, 3D, audio, escenas y bucle para juegos C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
 examples/cpp_smoke     Smoke C++ de la bridge cxx (CMake)
@@ -138,6 +138,8 @@ El audio desde C++ (ADR-024) usa handles opacos `u64`: `load_sound`, `play_sound
 
 Los servicios 3D desde C++ (ADR-025) añaden física `rapier3d` (`set_gravity3d`, `add_body3d`, `add_collider3d`, `body_state3d`, `apply_impulse3d`, `cast_ray3d`, `step_physics3d`), mallas glTF (`load_gltf`, `define_mesh`, `mesh_vertex_count`) y órdenes validadas (`set_camera3d`, `view_projection3d`, `submit_mesh_draws`, `mesh_draw`). `lunar_render3d` es una superficie CPU sin `wgpu`: los handles son opacos, `MeshDrawCpp` es POD y la presentación GPU de mallas queda para una ADR posterior. `dim3` sigue sin arrastrar assets ni la bridge; la conversión glTF→malla solo se activa en `lunar_bridge`.
 
+Los documentos de escena desde C++ (ADR-026) sustituyen al `Scene` suelto por un `EditorDocument` dentro de Rust: `save_scene`, `save_scene_as`, `save_scene_current`, `scene_path`, `scene_is_dirty`, `scene_can_undo`, `scene_can_redo`, `scene_undo`, `scene_redo` y los comandos `editor_create_entity`, `editor_delete_entity`, `editor_rename_entity` y `editor_set_transform`. `reload_scene()` fuerza la lectura del archivo; `poll_scene_reload()` es la recarga en caliente cooperativa y solo actúa si el archivo cambió (fecha, longitud y hash) y no hay cambios locales. Ningún `EditorCommand`, `Scene`, `Renderer` ni `wgpu` cruza la FFI.
+
 ## Hitos
 
 | Hito | Contenido | Estado |
@@ -159,5 +161,6 @@ Los servicios 3D desde C++ (ADR-025) añaden física `rapier3d` (`set_gravity3d`
 | H14 | Input de ratón, scroll y viewport en C++ (ADR-023) | ✅ |
 | H15 | Audio desde C++ con handles opacos (ADR-024) | ✅ |
 | H16 | Servicios 3D desde C++ y órdenes de mallas (ADR-025) | ✅ |
+| H17 | Documentos de escena y recarga desde C++ (ADR-026) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).

@@ -46,6 +46,16 @@ int main() {
         return 1;
     }
 
+    // Sin escena cargada, el documento está vacío y las operaciones se rechazan.
+    if (!engine->scene_path().empty() || engine->scene_is_dirty() ||
+        engine->scene_can_undo() || engine->scene_can_redo() ||
+        engine->save_scene_current() || engine->reload_scene() ||
+        engine->poll_scene_reload() ||
+        engine->editor_create_entity(1, "Nave")) {
+        std::cerr << "el documento de escena vacío no se comportó como tal\n";
+        return 1;
+    }
+
     FrameStats stats;
     // El primer frame ancla el reloj; los 60 siguientes producen un tick cada uno.
     for (int frame = 0; frame < 61; ++frame) {

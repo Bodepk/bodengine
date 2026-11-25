@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use lunar_assets::{
     ImageHandle, ImageStore,
@@ -31,7 +31,8 @@ use lunar_platform::{PlatformApp, WindowConfig};
 use lunar_render::{Renderer, SpriteDraw as RenderSpriteDraw, SpriteId};
 use lunar_render3d::{MeshDraw, MeshId, Renderer3D};
 
-use lunar_scenes::{BodyType, Component, Scene, Shape2D as SceneShape2D};
+use lunar_editor::{EditorCommand, EditorDocument};
+use lunar_scenes::{BodyType, Component, Scene, Shape2D as SceneShape2D, Transform};
 
 /// Motor opaco expuesto a C++.
 pub struct Engine {
@@ -68,7 +69,10 @@ pub struct Engine {
     player: AudioPlayer,
     plays: HashMap<u64, AudioHandle>,
     next_play: u64,
-    scene: Option<Scene>,
+    editor: Option<EditorDocument>,
+    scene_path: Option<PathBuf>,
+    scene_relative: String,
+    scene_stamp: Option<SceneStamp>,
     sprites: Vec<SpriteDef>,
     sprite_ids: HashMap<u64, usize>,
     uploaded: Vec<Option<SpriteId>>,
@@ -76,6 +80,14 @@ pub struct Engine {
     draws: Vec<PendingDraw>,
     invalid_draw: bool,
     viewport: ffi::ViewportInfo,
+}
+
+/// Huella barata del archivo de escena para la recarga cooperativa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SceneStamp {
+    modified: SystemTime,
+    len: u64,
+    hash: u64,
 }
 
 struct SpriteDef {
@@ -198,6 +210,35 @@ fn safe_asset_path(base: &Path, asset: &str) -> Option<PathBuf> {
 }
 
 impl Engine {
+    /// Escena del documento activo; todas las lecturas pasan por el editor.
+    fn scene(&self) -> Option<&Scene> {
+        self.editor.as_ref().map(EditorDocument::scene)
+    }
+
+    /// Huella del archivo: fecha, longitud y hash FNV-1a, sin dependencias nuevas.
+    fn file_stamp(path: &Path) -> Option<SceneStamp> {
+        let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+        let bytes = std::fs::read(path).ok()?;
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        for byte in &bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        Some(SceneStamp {
+            modified,
+            len: bytes.len() as u64,
+            hash,
+        })
+    }
+
+    /// Instala un documento y recuerda la ruta y la marca de tiempo leídas.
+    fn install_scene(&mut self, document: EditorDocument, relative: &str, path: &Path) {
+        self.editor = Some(document);
+        self.scene_relative = relative.to_owned();
+        self.scene_path = Some(path.to_path_buf());
+        self.scene_stamp = Self::file_stamp(path);
+    }
+
     fn title(&self) -> String {
         self.inner.config.title.clone()
     }
@@ -688,29 +729,167 @@ impl Engine {
     }
 
     fn load_scene(&mut self, path: &str) -> bool {
-        let Some(path) = safe_asset_path(&self.assets_dir, path) else {
+        let Some(resolved) = safe_asset_path(&self.assets_dir, path) else {
             return false;
         };
-        let Ok(mut scene) = Scene::load_from_path(path) else {
+        let Ok(mut scene) = Scene::load_from_path(&resolved) else {
             return false;
         };
         if scene.normalize_asset_paths().is_err() {
             return false;
         }
-        self.scene = Some(scene);
+        let Ok(document) = EditorDocument::from_scene(scene) else {
+            return false;
+        };
+        self.install_scene(document, path, &resolved);
         true
     }
 
+    /// Guarda el documento en la ruta indicada y la recuerda para futuras recargas.
+    fn save_scene(&mut self, path: &str) -> bool {
+        let Some(resolved) = safe_asset_path(&self.assets_dir, path) else {
+            return false;
+        };
+        let Some(editor) = self.editor.as_mut() else {
+            return false;
+        };
+        if editor.save_to_path(&resolved).is_err() {
+            return false;
+        }
+        self.scene_relative = path.to_owned();
+        self.scene_path = Some(resolved.clone());
+        self.scene_stamp = Self::file_stamp(&resolved);
+        true
+    }
+
+    /// Alias de `save_scene`, explícito para los callers de C++.
+    fn save_scene_as(&mut self, path: &str) -> bool {
+        self.save_scene(path)
+    }
+
+    /// Guarda en la última ruta conocida, sin permitir cambiarla desde C++.
+    fn save_scene_current(&mut self) -> bool {
+        if self.scene_path.is_none() {
+            return false;
+        }
+        let relative = self.scene_relative.clone();
+        self.save_scene(&relative)
+    }
+
+    fn scene_path(&self) -> String {
+        self.scene_relative.clone()
+    }
+
+    fn scene_is_dirty(&self) -> bool {
+        self.editor.as_ref().is_some_and(|editor| editor.is_dirty())
+    }
+
+    fn scene_can_undo(&self) -> bool {
+        self.editor.as_ref().is_some_and(|editor| editor.can_undo())
+    }
+
+    fn scene_can_redo(&self) -> bool {
+        self.editor.as_ref().is_some_and(|editor| editor.can_redo())
+    }
+
+    fn scene_undo(&mut self) -> bool {
+        self.editor.as_mut().is_some_and(EditorDocument::undo)
+    }
+
+    fn scene_redo(&mut self) -> bool {
+        self.editor.as_mut().is_some_and(EditorDocument::redo)
+    }
+
+    fn editor_create_entity(&mut self, id: u64, name: &str) -> bool {
+        let Some(editor) = self.editor.as_mut() else {
+            return false;
+        };
+        let name = (!name.is_empty()).then(|| name.to_owned());
+        editor
+            .apply(EditorCommand::CreateEntity { id, name })
+            .is_ok()
+    }
+
+    fn editor_delete_entity(&mut self, id: u64) -> bool {
+        let Some(editor) = self.editor.as_mut() else {
+            return false;
+        };
+        editor.apply(EditorCommand::DeleteEntity { id }).is_ok()
+    }
+
+    fn editor_rename_entity(&mut self, id: u64, name: &str) -> bool {
+        let Some(editor) = self.editor.as_mut() else {
+            return false;
+        };
+        let name = (!name.is_empty()).then(|| name.to_owned());
+        editor
+            .apply(EditorCommand::RenameEntity { id, name })
+            .is_ok()
+    }
+
+    /// Sustituye la transformación completa; los arrays se pasan como escalares POD.
+    #[allow(clippy::too_many_arguments)] // vectoriales y cuaternión en la ABI C++
+    fn editor_set_transform(
+        &mut self,
+        id: u64,
+        tx: f32,
+        ty: f32,
+        tz: f32,
+        qx: f32,
+        qy: f32,
+        qz: f32,
+        qw: f32,
+        sx: f32,
+        sy: f32,
+        sz: f32,
+    ) -> bool {
+        let Some(editor) = self.editor.as_mut() else {
+            return false;
+        };
+        let transform = Transform {
+            translation: [tx, ty, tz],
+            rotation: [qx, qy, qz, qw],
+            scale: [sx, sy, sz],
+        };
+        editor
+            .apply(EditorCommand::SetTransform { id, transform })
+            .is_ok()
+    }
+
+    /// Recarga explícita: reemplaza el documento aunque tenga cambios sin guardar.
+    fn reload_scene(&mut self) -> bool {
+        if self.scene_path.is_none() {
+            return false;
+        }
+        let relative = self.scene_relative.clone();
+        self.load_scene(&relative)
+    }
+
+    /// Recarga cooperativa: solo actúa si el archivo cambió y no hay cambios locales.
+    fn poll_scene_reload(&mut self) -> bool {
+        let Some(path) = self.scene_path.clone() else {
+            return false;
+        };
+        if self.scene_is_dirty() {
+            return false;
+        }
+        let Some(stamp) = Self::file_stamp(&path) else {
+            return false;
+        };
+        if self.scene_stamp == Some(stamp) {
+            return false;
+        }
+        let relative = self.scene_relative.clone();
+        self.load_scene(&relative)
+    }
+
     fn entity_count(&self) -> u32 {
-        self.scene
-            .as_ref()
-            .map_or(0, |scene| scene.entities.len() as u32)
+        self.scene().map_or(0, |scene| scene.entities.len() as u32)
     }
 
     fn entity(&self, index: u32) -> ffi::EntityInfo {
         let Some(entity) = self
-            .scene
-            .as_ref()
+            .scene()
             .and_then(|scene| scene.entities.get(index as usize))
         else {
             return ffi::EntityInfo::default();
@@ -986,7 +1165,10 @@ fn new_with_config(config: CoreEngineConfig, assets_dir: PathBuf) -> Box<Engine>
         player: AudioPlayer::new(),
         plays: HashMap::new(),
         next_play: 1,
-        scene: None,
+        editor: None,
+        scene_path: None,
+        scene_relative: String::new(),
+        scene_stamp: None,
         sprites: Vec::new(),
         sprite_ids: HashMap::new(),
         uploaded: Vec::new(),
@@ -1314,6 +1496,35 @@ mod ffi {
         fn mesh_draw(self: &Engine, index: u32) -> MeshDrawCpp;
 
         fn load_scene(self: &mut Engine, path: &str) -> bool;
+        fn save_scene(self: &mut Engine, path: &str) -> bool;
+        fn save_scene_as(self: &mut Engine, path: &str) -> bool;
+        fn save_scene_current(self: &mut Engine) -> bool;
+        fn scene_path(self: &Engine) -> String;
+        fn scene_is_dirty(self: &Engine) -> bool;
+        fn scene_can_undo(self: &Engine) -> bool;
+        fn scene_can_redo(self: &Engine) -> bool;
+        fn scene_undo(self: &mut Engine) -> bool;
+        fn scene_redo(self: &mut Engine) -> bool;
+        fn editor_create_entity(self: &mut Engine, id: u64, name: &str) -> bool;
+        fn editor_delete_entity(self: &mut Engine, id: u64) -> bool;
+        fn editor_rename_entity(self: &mut Engine, id: u64, name: &str) -> bool;
+        #[allow(clippy::too_many_arguments)]
+        fn editor_set_transform(
+            self: &mut Engine,
+            id: u64,
+            tx: f32,
+            ty: f32,
+            tz: f32,
+            qx: f32,
+            qy: f32,
+            qz: f32,
+            qw: f32,
+            sx: f32,
+            sy: f32,
+            sz: f32,
+        ) -> bool;
+        fn reload_scene(self: &mut Engine) -> bool;
+        fn poll_scene_reload(self: &mut Engine) -> bool;
         fn entity_count(self: &Engine) -> u32;
         fn entity(self: &Engine, index: u32) -> EntityInfo;
         fn load_sound(self: &mut Engine, asset: &str) -> u64;
@@ -1367,6 +1578,98 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
         }
+    }
+
+    fn config_for_dir(dir: &Path) -> ffi::GameConfig {
+        ffi::GameConfig {
+            title: "scene doc".to_owned(),
+            width: 320,
+            height: 240,
+            assets_dir: dir.to_string_lossy().into_owned(),
+        }
+    }
+
+    /// Escena mínima en un directorio temporal, sin tocar los assets del repo.
+    fn temp_scene_config() -> (ffi::GameConfig, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("lunar_h17_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("directorio temporal");
+        let scene = r#"{"version":1,"name":"temp","entities":[]}"#;
+        std::fs::write(dir.join("scene.json"), scene).expect("escena inicial");
+        (config_for_dir(&dir), dir)
+    }
+
+    #[test]
+    fn scene_documents_save_undo_redo_and_reload() {
+        let (config, dir) = temp_scene_config();
+        let mut engine = new_game_engine(config);
+        assert!(engine.load_scene("scene.json"));
+        assert_eq!(engine.scene_path(), "scene.json");
+        assert_eq!(engine.entity_count(), 0);
+        assert!(!engine.scene_is_dirty());
+
+        assert!(engine.editor_create_entity(7, "Nave"));
+        assert_eq!(engine.entity_count(), 1);
+        assert_eq!(engine.entity(0).name, "Nave");
+        assert!(engine.scene_is_dirty());
+        assert!(engine.scene_can_undo());
+        assert!(engine.editor_rename_entity(7, "Nave 2"));
+        assert_eq!(engine.entity(0).name, "Nave 2");
+        assert!(engine.editor_set_transform(7, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0));
+        assert_eq!(engine.entity(0).x, 1.0);
+        assert_eq!(engine.entity(0).scale_x, 2.0);
+
+        assert!(engine.scene_undo());
+        assert!(engine.scene_undo());
+        assert!(engine.scene_undo());
+        assert_eq!(engine.entity_count(), 0);
+        assert!(!engine.scene_can_undo());
+        assert!(engine.scene_redo());
+        assert!(engine.scene_redo());
+        assert!(engine.scene_redo());
+        assert_eq!(engine.entity(0).name, "Nave 2");
+
+        assert!(engine.save_scene("saved.json"));
+        assert!(!engine.scene_is_dirty());
+        assert!(dir.join("saved.json").exists());
+        assert!(engine.save_scene_as("saved.json"));
+        assert!(engine.save_scene_current());
+        assert!(engine.reload_scene());
+        assert_eq!(engine.scene_path(), "saved.json");
+        assert_eq!(engine.entity_count(), 1);
+
+        // Sin cambios en disco no hay recarga; con cambios y documento limpio, sí.
+        assert!(!engine.poll_scene_reload());
+        std::fs::write(
+            dir.join("saved.json"),
+            r#"{"version":1,"name":"externo","entities":[]}"#,
+        )
+        .expect("escena externa");
+        assert!(engine.poll_scene_reload());
+        assert_eq!(engine.entity_count(), 0);
+
+        assert!(engine.editor_create_entity(9, "Local"));
+        assert!(
+            std::fs::write(
+                dir.join("saved.json"),
+                r#"{"version":1,"name":"otro","entities":[]}"#
+            )
+            .is_ok()
+        );
+        assert!(!engine.poll_scene_reload());
+        assert!(engine.scene_is_dirty());
+        assert!(engine.reload_scene());
+        assert_eq!(engine.entity_count(), 0);
+
+        assert!(!engine.load_scene("../escape.json"));
+        assert!(!engine.save_scene("../escape.json"));
+
+        let mut empty = new_game_engine(config_for_dir(&dir));
+        assert!(!empty.editor_create_entity(9, "sin documento"));
+        assert!(!empty.save_scene_current());
+        assert!(!empty.reload_scene());
+        assert!(!empty.poll_scene_reload());
+        assert_eq!(empty.scene_path(), "");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

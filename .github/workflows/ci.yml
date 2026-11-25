@@ -65,6 +65,7 @@ jobs:
           grep -q 'mouse_state' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           grep -q 'load_sound' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           grep -q 'submit_mesh_draws' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
+          grep -q 'poll_scene_reload' build/sdk-prefix/include/lunar_bridge/src/lib.rs.h
           cmake -S examples/cpp_sdk_template -B build/cpp_sdk_template \
             -DCMAKE_PREFIX_PATH="$PWD/build/sdk-prefix"
           cmake --build build/cpp_sdk_template --config Release
@@ -230,6 +231,7 @@ jobs:
           grep -q 'lunar_audio v' tree-bridge.txt
           grep -q 'rodio v' tree-bridge.txt
           grep -q 'lunar_scenes v' tree-bridge.txt
+          grep -q 'lunar_editor v' tree-bridge.txt
           ! grep -q 'egui v' tree-bridge.txt
           ! grep -q 'eframe v' tree-bridge.txt
           ! grep -q 'lunar_editor_ui' tree-bridge.txt

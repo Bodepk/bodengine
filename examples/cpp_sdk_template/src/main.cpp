@@ -94,6 +94,13 @@ int main() {
         return 1;
     }
 
+    // Documento de escena: sin ruta conocida no hay guardado ni recarga.
+    if (!engine->scene_path().empty() || engine->save_scene_current() ||
+        engine->reload_scene() || engine->poll_scene_reload()) {
+        std::cerr << "el documento de escena del SDK no está vacío\n";
+        return 1;
+    }
+
     // Los 60 frames siguientes producen un tick cada uno.
     for (int frame = 1; frame < 61; ++frame) {
         stats = engine->tick(kFixedDtNs);
