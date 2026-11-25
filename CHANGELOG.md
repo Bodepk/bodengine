@@ -2,6 +2,18 @@
 
 Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-index.md).
 
+## [No publicado]
+
+### Añadido
+
+- Editor gráfico opcional `lunar_editor_ui` con `egui`/`eframe` 0.37: jerarquía, inspector de nombre/transformación/padre/componentes, selección, undo/redo, abrir/guardar JSON y atajos de teclado (ADR-019).
+- Feature raíz `editor_ui`, que implica `editor` y queda fuera de `default`.
+
+### Seguridad y compatibilidad
+
+- Ni `default`, `dim2`, `dim3`, `assets`, `scenes` ni el build sin features incluyen `lunar_editor_ui`, `egui` ni `eframe`; CI verifica los árboles de dependencias.
+- La GUI delega cada mutación a `EditorDocument::apply`; el núcleo `lunar_editor` no gana dependencias nuevas.
+
 ## [0.1.0] — 2026-11-24
 
 Primera versión funcional del motor Lunar: núcleo Rust, API pública C++ mediante `cxx` y hitos H0–H11 completados.

@@ -9,7 +9,7 @@ El motor debe ser portable entre Windows, Linux y macOS, y tener una API públic
 
 ## Decisión
 
-El stack aprobado es, y se limita a: `winit` (ventana), `wgpu` (render), `rapier` (física 2D/3D), `bevy_ecs` (ECS), `image` y `gltf` (assets), `rodio` (audio) y `cxx` (FFI). Se añaden `serde`/`serde_json` para escenas, aprobados explícitamente antes de H9 (ver ADR-008).
+El stack aprobado es, y se limita a: `winit` (ventana), `wgpu` (render), `rapier` (física 2D/3D), `bevy_ecs` (ECS), `image` y `gltf` (assets), `rodio` (audio) y `cxx` (FFI). Se añaden `serde`/`serde_json` para escenas, aprobados explícitamente antes de H9 (ver ADR-008), y `egui`/`eframe` para la interfaz del editor, aprobados explícitamente antes de implementarla (ver ADR-019).
 
 Versiones fijadas hasta ahora:
 
@@ -22,6 +22,7 @@ Versiones fijadas hasta ahora:
 - `rodio` = 0.23.0 (MSRV 1.87), fijado en H8 (ADR-014) con `default-features = false` y `playback`, `wav`.
 - `serde` = 1.0.229 (feature `derive`) y `serde_json` = 1.0.154, fijados en H9 (ADR-008) y confinados a `lunar_scenes`.
 - `bevy_ecs` = 0.20.1 (MSRV 1.95, edition 2024). Reason: la toolchain instalada es Rust 1.100.0.
+- `egui` y `eframe` = 0.37.0, fijados para la GUI del editor (ADR-019) con `eframe` sin features por defecto y backend `wgpu`.
 - Toolchain Rust = 1.100.0, edition 2024, resolver 3.
 
 Cualquier dependencia nueva fuera de esta lista requiere justificación escrita y aprobación del usuario antes de entrar en `Cargo.toml`.
@@ -30,4 +31,4 @@ Cualquier dependencia nueva fuera de esta lista requiere justificación escrita 
 
 - Las versiones del stack ya están fijadas en su hito correspondiente, con su MSRV verificado.
 - CI ejecuta `cargo tree -e features` para detectar arrastres accidentales de features 2D/3D.
-- No se introduce `tokio`, `async-std` ni frameworks GUI antes de H10.
+- No se introduce `tokio` ni `async-std`; el único toolkit GUI es `egui`/`eframe`, confinado a `lunar_editor_ui` y fuera de `default` (ADR-019).

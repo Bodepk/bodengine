@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H11 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H11 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con jerarquía e inspector (ADR-019). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -24,6 +24,7 @@ Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `
 | Assets glTF | `gltf` | 1.4.1 |
 | Audio | `rodio` | 0.23.0 (playback + WAV) |
 | Escenas | `serde` / `serde_json` | 1.0.229 / 1.0.154 |
+| GUI del editor | `egui`, `eframe` | 0.37.0 |
 | FFI C++ | `cxx`, `cxx-build` | 1.0.205 |
 
 Toolchain fijada en `rust-toolchain.toml`: Rust 1.100.0.
@@ -45,6 +46,7 @@ crates/
   lunar_audio       Reproducción WAV con rodio y handles opacos
   lunar_scenes      Escenas JSON versionadas y validación sin GPU
   lunar_editor      Núcleo de edición headless: comandos, selección y undo/redo
+  lunar_editor_ui   GUI opcional con egui: jerarquía e inspector
   lunar_bridge      Frontera cxx / API C++
   lunar_runtime     Composición de todos los subsistemas
 examples/minimal_game  Smoke 800x600 con render del H2
@@ -56,7 +58,7 @@ tests/fixtures     Datos de prueba sin GPU
 
 ## Features
 
-`default` activa `dim2`, `dim3`, `assets`, `gltf`, `audio`, `scenes`, `bridge` y `runtime`; el editor queda fuera por decisión de ADR-007/015 y se activa con `--features editor`. `gltf` implica `assets`, pero `assets` no implica `gltf`. Los builds parciales:
+`default` activa `dim2`, `dim3`, `assets`, `gltf`, `audio`, `scenes`, `bridge` y `runtime`; el editor queda fuera por decisión de ADR-007/015 y se activa con `--features editor`. La interfaz gráfica es aún más opcional: `--features editor_ui` implica `editor` y añade `lunar_editor_ui` con `egui`/`eframe`. `gltf` implica `assets`, pero `assets` no implica `gltf`. Los builds parciales:
 
 ```bash
 cargo build -p lunar --no-default-features --features dim2
@@ -66,7 +68,7 @@ cargo build -p lunar --no-default-features
 
 La última variante excluye también `wgpu`, `image`, `gltf`, `rodio`, `cpal` y `serde_json`: `lunar_platform/render` se activa desde la feature `render` del crate raíz, y `assets` no la activan `dim2` ni `dim3`.
 
-El workflow de CI verifica con `cargo tree -e features` que los árboles 2D-only y 3D-only no arrastran crates de la otra dimensión ni assets, audio o escenas; que `assets` incluye `image` pero no `gltf`; que `gltf` incluye el loader fijado en 1.4.1; que `scenes` incluye `serde`/`serde_json` sin requerir GPU; y que el editor no aparece salvo con `--features editor`. Además compila cada variante parcial y `--all-features` en Linux, Windows y macOS.
+El workflow de CI verifica con `cargo tree -e features` que los árboles 2D-only y 3D-only no arrastran crates de la otra dimensión ni assets, audio o escenas; que `assets` incluye `image` pero no `gltf`; que `gltf` incluye el loader fijado en 1.4.1; que `scenes` incluye `serde`/`serde_json` sin requerir GPU; que el editor no aparece salvo con `--features editor`; y que la GUI no aparece salvo con `--features editor_ui`. Además compila cada variante parcial y `--all-features` en Linux, Windows y macOS.
 
 ## Comandos
 
@@ -76,7 +78,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p minimal_game
 cargo run -p scene_demo
+cargo run -p lunar_editor_ui                         # escena nueva vacía
+cargo run -p lunar_editor_ui -- ruta/a/scene.json    # abre un JSON existente
 ```
+
+El editor gráfico (ADR-019) muestra jerarquía, inspector de nombre/transformación/padre/componentes, deshacer y rehacer, y guardado JSON. Toda mutación pasa por `EditorDocument::apply`; el panel central es un diagrama de nodos, no una vista de juego ni un preview de sprites. Atajos: `Ctrl+S`, `Ctrl+Z`, `Ctrl+Shift+Z`/`Ctrl+Y` y `Supr`.
 
 La demo abre una ventana 800×600 y consume `examples/scene_demo/assets/demo.scene.json`: lee el glTF, toma el color del PNG, reproduce el WAV con el volumen de la escena y muestra el editor headless. WASD mueve el triángulo, `W` reproduce el sonido, `S` lo detiene, `↑` renombra la entidad, `↓` deshace, `←` rehace y `Esc` cierra. Para regenerar los assets sintéticos:
 
