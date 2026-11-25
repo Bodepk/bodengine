@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "name": "Plataformas Ninja Frog",
+  "entities": [
+    {
+      "id": 1,
+      "name": "Fondo",
+      "transform": {
+        "translation": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [15.0, 8.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/background_blue.png" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Suelo",
+      "transform": {
+        "translation": [0.0, -3.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [40.0, 1.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/terrain_tiles.png" },
+        {
+          "kind": "collider2_d",
+          "shape": { "kind": "cuboid", "half_extents": [10.0, 0.25] },
+          "body": "fixed"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Plataforma izquierda",
+      "transform": {
+        "translation": [-3.0, -0.75, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [6.0, 1.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/platform_brown.png" },
+        {
+          "kind": "collider2_d",
+          "shape": { "kind": "cuboid", "half_extents": [3.0, 0.125] },
+          "body": "fixed"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Plataforma derecha",
+      "transform": {
+        "translation": [3.5, 0.75, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [5.0, 1.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/platform_brown.png" },
+        {
+          "kind": "collider2_d",
+          "shape": { "kind": "cuboid", "half_extents": [2.5, 0.125] },
+          "body": "fixed"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Caja",
+      "transform": {
+        "translation": [5.5, -2.5, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/crate_idle.png" },
+        {
+          "kind": "collider2_d",
+          "shape": { "kind": "cuboid", "half_extents": [0.4375, 0.375] },
+          "body": "fixed"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Manzana 1",
+      "transform": {
+        "translation": [-2.0, -2.2, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/collectible_apple.png" }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Manzana 2",
+      "transform": {
+        "translation": [3.5, -0.1, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/collectible_apple.png" }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Meta",
+      "transform": {
+        "translation": [9.0, -2.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [2.0, 2.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/goal_end.png" }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Jugador Ninja Frog",
+      "transform": {
+        "translation": [-8.0, -1.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "components": [
+        { "kind": "image", "asset": "sprites/player_ninja_frog_idle.png" },
+        {
+          "kind": "collider2_d",
+          "shape": { "kind": "cuboid", "half_extents": [0.45, 0.5] },
+          "body": "dynamic"
+        }
+      ]
+    }
+  ]
+}
