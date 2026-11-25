@@ -41,6 +41,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [022](ADR-022-cpp-sdk.md) | SDK C++ distribuible | Aceptada |
 | [023](ADR-023-cpp-mouse-input.md) | Input de ratón y viewport en C++ | Aceptada |
 | [024](ADR-024-cpp-audio.md) | Audio desde C++ | Aceptada |
+| [025](ADR-025-cpp-3d.md) | Servicios 3D en la bridge C++ | Aceptada |
 
 ## Consecuencias
 
