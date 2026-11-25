@@ -36,6 +36,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [017](ADR-017-demo-render.md) | Gancho de frame y triángulo de demo | Aceptada |
 | [018](ADR-018-sprite-platformer.md) | Juego de plataformas con sprites | Aceptada |
 | [019](ADR-019-editor-ui.md) | Interfaz gráfica del editor | Aceptada |
+| [020](ADR-020-visual-editor.md) | Editor visual con assets arrastrables | Aceptada |
 
 ## Consecuencias
 

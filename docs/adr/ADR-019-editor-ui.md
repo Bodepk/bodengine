@@ -2,6 +2,7 @@
 
 - Estado: Aceptada
 - Fecha: 2026-11-24
+- Nota: ADR-020 sustituye el diagrama del panel central por una vista 2D con sprites y añade arrastre de assets, gizmos y jerarquía reordenable.
 
 ## Contexto
 
