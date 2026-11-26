@@ -10,7 +10,7 @@ use crate::canvas::{CanvasDrag, canvas_ui};
 use crate::file_picker::{FilePicker, PickerMode, absolute_dir, parent_dir};
 use crate::helpers::{audio_component, collider2_component, image_component, next_entity_id};
 use crate::layout;
-use crate::play::{PlayState, dynamic_ids, step_vertical};
+use crate::play::{PlayState, dynamic_ids, floor_y, step_vertical};
 use crate::recent;
 use crate::status::{ConsoleFilter, LogEntry};
 use crate::tools::{EntityTemplate, TransformMode};
@@ -75,6 +75,7 @@ pub(crate) struct EditorApp {
     pub(crate) play_state: PlayState,
     pub(crate) play_time: f32,
     pub(crate) play_velocities: HashMap<u64, f32>,
+    play_floor: f32,
     play_snapshot: Option<(Scene, Vec<u64>)>,
     pub(crate) pending_action: Option<PendingAction>,
     pub(crate) save_as_open: bool,
@@ -143,6 +144,7 @@ impl EditorApp {
             play_state: PlayState::Stopped,
             play_time: 0.0,
             play_velocities: HashMap::new(),
+            play_floor: 0.0,
             play_snapshot: None,
             pending_action: None,
             save_as_open: false,
@@ -458,6 +460,7 @@ impl EditorApp {
             .into_iter()
             .map(|id| (id, 0.0))
             .collect();
+        self.play_floor = floor_y(self.document.scene());
         self.preview.clear();
         self.drag = CanvasDrag::None;
         self.play_time = 0.0;
@@ -531,7 +534,7 @@ impl EditorApp {
                 .map_or(original.translation[1], |transform| {
                     transform.translation[1]
                 });
-            let (y, velocity) = step_vertical(current_y, velocity, step);
+            let (y, velocity) = step_vertical(current_y, velocity, step, self.play_floor);
             self.play_velocities.insert(id, velocity);
             let mut transform = original;
             transform.translation[1] = y;
@@ -804,6 +807,30 @@ mod tests {
             3.0
         );
         assert!(!app.document.is_dirty());
+    }
+
+    #[test]
+    fn play_does_not_snap_entities_upward() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let mut scene = scene_with_dynamic_entity();
+        scene.entities[0].transform.translation[1] = -3.0;
+        let mut ground = SceneEntity::new(2);
+        ground.transform.translation = [0.0, -5.0, 0.0];
+        ground.components.push(Component::Collider2D {
+            shape: Shape2D::Ball { radius: 0.5 },
+            body: BodyType::Fixed,
+        });
+        scene.entities.push(ground);
+        app.document = EditorDocument::from_scene(scene).unwrap();
+        app.play();
+        app.tick_play(0.1);
+        let y = app.preview[&1].translation[1];
+        assert!(
+            y < -3.0,
+            "la entidad debe caer hacia abajo, no saltar a 0 ({y})"
+        );
+        app.stop_play();
     }
 
     #[test]
