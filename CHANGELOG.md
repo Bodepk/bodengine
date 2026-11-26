@@ -13,6 +13,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Comando `SetComponent { id, index, component }` en `lunar_editor`, validado y deshecho como los demás comandos.
 - Selección rectangular en el lienzo (Shift/Ctrl para extenderla), atajo `F` para encuadrar la selección o toda la escena y coordenadas del cursor en unidades de mundo.
 - Preferencias persistentes del editor (ADR-031): raíz de assets, centro y zoom de la cámara, rejilla y snap en `LunarEditor/settings.txt`, con valores por defecto por campo si el fichero falta o es inválido.
+- Historial del estado del editor: un único método registra hasta 50 mensajes en memoria y el botón «Historial» de la barra de estado abre una ventana para consultarlos o limpiarlos.
 
 ### Cambiado
 
