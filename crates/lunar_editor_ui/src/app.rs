@@ -9,7 +9,9 @@ use crate::assets::{AssetKind, AssetLibrary, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
 use crate::file_picker::{FilePicker, PickerMode, absolute_dir, parent_dir};
 use crate::helpers::{audio_component, image_component, next_entity_id};
+use crate::layout;
 use crate::recent;
+use crate::status::{ConsoleFilter, LogEntry};
 use crate::{hierarchy, inspector};
 
 /// Acción que espera a resolver el aviso de cambios sin guardar.
@@ -52,7 +54,8 @@ pub(crate) struct EditorApp {
     synced_revision: u64,
     revision: u64,
     status: String,
-    pub(crate) status_log: Vec<String>,
+    pub(crate) status_log: Vec<LogEntry>,
+    pub(crate) console_filter: ConsoleFilter,
     pub(crate) show_log: bool,
     pub(crate) assets: AssetLibrary,
     pub(crate) assets_root_text: String,
@@ -85,6 +88,8 @@ impl EditorApp {
             }
         };
         let path_text = path.to_string_lossy().into_owned();
+        let mut status_log = Vec::new();
+        crate::status::push(&mut status_log, status.clone());
         let settings = crate::settings::load();
         let assets_root_text = settings.assets_root.clone();
         let mut assets = AssetLibrary::new(PathBuf::from(&assets_root_text));
@@ -107,8 +112,9 @@ impl EditorApp {
             synced_selection: Vec::new(),
             synced_revision: 0,
             revision: 0,
-            status: status.clone(),
-            status_log: vec![status],
+            status,
+            status_log,
+            console_filter: ConsoleFilter::default(),
             show_log: false,
             assets,
             assets_root_text,
@@ -458,30 +464,38 @@ impl eframe::App for EditorApp {
         self.handle_shortcuts(&ctx);
         self.sync_inspector();
 
-        egui::Panel::top("toolbar").show(ui, |ui| hierarchy::toolbar_ui(self, ui));
+        egui::Panel::top("toolbar")
+            .size_range(layout::TOOLBAR_HEIGHT..=layout::TOOLBAR_HEIGHT)
+            .resizable(false)
+            .show(ui, |ui| hierarchy::toolbar_ui(self, ui));
         egui::Panel::left("hierarchy")
-            .default_size(230.0)
+            .size_range(layout::HIERARCHY_RANGE.0..=layout::HIERARCHY_RANGE.1)
+            .default_size(layout::hierarchy_width(layout::HIERARCHY_WIDTH))
             .show(ui, |ui| hierarchy::hierarchy_ui(self, ui));
         egui::Panel::left("assets")
-            .default_size(240.0)
+            .size_range(layout::ASSETS_RANGE.0..=layout::ASSETS_RANGE.1)
+            .default_size(layout::assets_width(layout::ASSETS_WIDTH))
             .show(ui, |ui| assets_ui(self, ui));
         egui::Panel::right("inspector")
-            .default_size(330.0)
+            .size_range(layout::INSPECTOR_RANGE.0..=layout::INSPECTOR_RANGE.1)
+            .default_size(layout::inspector_width(layout::INSPECTOR_WIDTH))
             .show(ui, |ui| inspector::inspector_ui(self, ui));
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
+        // El primero de los paneles inferiores queda pegado al borde de la
+        // ventana; la consola se apila encima de la barra de estado.
+        egui::Panel::bottom("status")
+            .size_range(layout::STATUS_HEIGHT..=layout::STATUS_HEIGHT)
+            .resizable(false)
+            .show(ui, |ui| {
                 if self.status.is_empty() {
                     ui.label("Listo");
                 } else {
                     ui.colored_label(egui::Color32::LIGHT_GREEN, self.status.clone());
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Historial").clicked() {
-                        self.show_log = !self.show_log;
-                    }
-                });
             });
-        });
+        egui::Panel::bottom("console")
+            .size_range(layout::CONSOLE_RANGE.0..=layout::CONSOLE_RANGE.1)
+            .default_size(layout::console_height(layout::CONSOLE_HEIGHT))
+            .show(ui, |ui| crate::status::console_ui(self, ui));
         egui::CentralPanel::default().show(ui, |ui| canvas_ui(self, ui));
         crate::dialogs::show(self, &ctx);
         crate::status::log_window(self, &ctx);

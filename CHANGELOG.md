@@ -16,11 +16,13 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Historial del estado del editor: un único método registra hasta 50 mensajes en memoria y el botón «Historial» de la barra de estado abre una ventana para consultarlos o limpiarlos.
 - Atajos `Ctrl+O` para abrir la ruta del campo de texto y `Ctrl+Shift+S` para «Guardar como»; este último ya no dispara además un guardado normal.
 - Explorador de escenas integrado en el botón «Buscar…» de la barra y de «Guardar como»: navegación por carpetas, lista de `.json`, selección y doble clic para aceptar, sin diálogo nativo ni dependencias nuevas.
+- E1 del editor: layout con límites numéricos en `layout.rs`, ventana mínima 1280×720 que garantiza un viewport de 400×300 y consola acoplada con filtros Info/Avisos/Errores y contadores.
 
 ### Cambiado
 
 - La rotación del inspector se edita en grados (XYZ) y se convierte al cuaternión canónico en disco.
 - El volumen y el autoplay se editan por componente `Audio`; desaparecen los controles globales del inspector.
+- La confirmación de cambios sin guardar se muestra en la consola en vez de añadir una segunda fila a la barra de herramientas, y «Historial» se abre desde la consola.
 
 ### Corregido
 

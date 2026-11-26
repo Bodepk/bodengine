@@ -14,6 +14,7 @@ mod file_picker;
 mod helpers;
 mod hierarchy;
 mod inspector;
+mod layout;
 mod recent;
 mod settings;
 mod shortcuts;
@@ -33,7 +34,8 @@ pub fn run() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Lunar Editor")
-            .with_inner_size([1180.0, 720.0])
+            .with_inner_size(layout::WINDOW_SIZE)
+            .with_min_inner_size(layout::MIN_WINDOW_SIZE)
             .with_icon(icon),
         ..Default::default()
     };
