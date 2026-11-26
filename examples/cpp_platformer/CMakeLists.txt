@@ -67,13 +67,16 @@ if(MSVC)
   )
 elseif(APPLE)
   # Una staticlib Rust no propaga los `#[link]` de sus dependencias: CMake
-  # debe nombrar los frameworks que usan winit, wgpu y security-framework.
+  # debe nombrar los frameworks que usan winit, wgpu, cpal y security-framework.
   target_link_libraries(cpp_platformer PRIVATE pthread m objc iconv
     "-framework AppKit"
     "-framework ApplicationServices"
+    "-framework AudioUnit"
     "-framework Carbon"
+    "-framework CoreAudio"
     "-framework CoreFoundation"
     "-framework CoreGraphics"
+    "-framework CoreMIDI"
     "-framework Foundation"
     "-framework IOKit"
     "-framework Metal"
@@ -84,5 +87,5 @@ elseif(APPLE)
     "-framework UniformTypeIdentifiers"
   )
 else()
-  target_link_libraries(cpp_platformer PRIVATE dl pthread m rt)
+  target_link_libraries(cpp_platformer PRIVATE asound dl pthread m rt)
 endif()

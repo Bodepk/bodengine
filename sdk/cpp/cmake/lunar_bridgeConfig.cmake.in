@@ -23,9 +23,12 @@ if(NOT TARGET lunar::bridge)
       pthread m objc iconv
       "-framework AppKit"
       "-framework ApplicationServices"
+      "-framework AudioUnit"
       "-framework Carbon"
+      "-framework CoreAudio"
       "-framework CoreFoundation"
       "-framework CoreGraphics"
+      "-framework CoreMIDI"
       "-framework Foundation"
       "-framework IOKit"
       "-framework Metal"
@@ -37,7 +40,7 @@ if(NOT TARGET lunar::bridge)
     )
   else()
     set_property(TARGET lunar::bridge APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-      dl pthread m rt
+      asound dl pthread m rt
     )
   endif()
 endif()

@@ -50,6 +50,7 @@ Primera actualización de API desde `v0.1.0`: scripting C++ de primera clase, SD
 - H19 mantiene `FrameStats` y todas las firmas anteriores: los tiempos de CPU/render solo se informan, nunca gobiernan el paso fijo. El replay no guarda física, escenas ni assets y la bridge no expone `World`, Rapier ni `serde_json`. `reset_timing()` no modifica el mundo ECS ni el input.
 - H20 publica `v0.2.0` con el workspace y el SDK en la misma versión. `ExactVersion` se mantiene: los consumidores con `find_package(lunar_bridge 0.1.0 EXACT ...)` deben actualizar a `0.2.0 EXACT`. No se añaden dependencias ni se relaja la compatibilidad de la ABI C++; la release cubre H11–H19 (ADR-029).
 - El gate del build por defecto se ajusta: `default` incluye el editor headless a través de `bridge` desde H17, pero sigue excluyendo `lunar_editor_ui`, `egui` y `eframe`.
+- Los consumidores C++ enlazan las librerías de audio que la staticlib no propaga: `asound` en Linux y `AudioUnit`, `CoreAudio` y `CoreMIDI` en macOS. Afecta al smoke, al plataformas y al target importado del SDK; no se añaden dependencias nuevas.
 
 ## [0.1.0] — 2026-11-24
 
