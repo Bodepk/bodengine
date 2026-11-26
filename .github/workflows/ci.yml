@@ -193,11 +193,11 @@ jobs:
           grep -q 'pub const SCENE_VERSION: u32 = 2' crates/lunar_scenes/src/lib.rs
           grep -q 'pub fn upgrade' crates/lunar_scenes/src/lib.rs
           cargo test -p lunar_scenes
-      - name: Default build leaves the editor and GUI out
+      - name: Default build keeps the GUI out
         shell: bash
         run: |
           cargo tree -e features -p lunar > tree-default.txt
-          ! grep -q 'lunar_editor' tree-default.txt
+          grep -q 'lunar_editor v' tree-default.txt
           ! grep -q 'lunar_editor_ui' tree-default.txt
           ! grep -q 'egui v' tree-default.txt
           ! grep -q 'eframe v' tree-default.txt

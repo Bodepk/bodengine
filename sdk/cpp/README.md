@@ -11,7 +11,7 @@ cmake --install build/cpp_sdk --config Release
 Desde cualquier proyecto C++ externo:
 
 ```cmake
-find_package(lunar_bridge 0.1.0 EXACT CONFIG REQUIRED)
+find_package(lunar_bridge 0.2.0 EXACT CONFIG REQUIRED)
 target_link_libraries(mi_juego PRIVATE lunar::bridge)
 ```
 

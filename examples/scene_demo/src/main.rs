@@ -1,4 +1,4 @@
-//! Demo jugable de `v0.1.0`: escena JSON, glTF, PNG, WAV y editor headless.
+//! Demo jugable de `v0.2.0`: escena JSON, glTF, PNG, WAV y editor headless.
 //!
 //! WASD mueve el triángulo, W también reproduce el WAV, S detiene el audio,
 //! ArrowUp aplica un cambio con el editor, ArrowDown deshace y ArrowLeft rehace.

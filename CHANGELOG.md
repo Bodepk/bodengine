@@ -2,7 +2,9 @@
 
 Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-index.md).
 
-## [No publicado]
+## [0.2.0] — 2026-11-25
+
+Primera actualización de API desde `v0.1.0`: scripting C++ de primera clase, SDK instalable, servicios 3D y edición de escenas desde C++, escenas v2 y diagnósticos deterministas. La versión del workspace y la del SDK pasan a `0.2.0` (ADR-029).
 
 ### Añadido
 
@@ -46,6 +48,8 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - H17 no expone `Editor`, `EditorCommand`, `Scene`, `Renderer` ni `wgpu`: la bridge posee un `EditorDocument` privado y solo cruzan escalares, cadenas y rutas validadas dentro de `assets_dir`. `poll_scene_reload()` nunca sobrescribe un documento sucio. El esquema sigue en v1.
 - H18 eleva el esquema a v2: `Component::Image` no gana campos, las escenas v1 solo se aceptan mediante `v1::upgrade`, y `deny_unknown_fields` impide mezclar campos de v2 en documentos que declaran `"version": 1`. Ningún tipo de animación o prefab cruza la FFI.
 - H19 mantiene `FrameStats` y todas las firmas anteriores: los tiempos de CPU/render solo se informan, nunca gobiernan el paso fijo. El replay no guarda física, escenas ni assets y la bridge no expone `World`, Rapier ni `serde_json`. `reset_timing()` no modifica el mundo ECS ni el input.
+- H20 publica `v0.2.0` con el workspace y el SDK en la misma versión. `ExactVersion` se mantiene: los consumidores con `find_package(lunar_bridge 0.1.0 EXACT ...)` deben actualizar a `0.2.0 EXACT`. No se añaden dependencias ni se relaja la compatibilidad de la ABI C++; la release cubre H11–H19 (ADR-029).
+- El gate del build por defecto se ajusta: `default` incluye el editor headless a través de `bridge` desde H17, pero sigue excluyendo `lunar_editor_ui`, `egui` y `eframe`.
 
 ## [0.1.0] — 2026-11-24
 
@@ -72,4 +76,5 @@ Primera versión funcional del motor Lunar: núcleo Rust, API pública C++ media
 - `on_render` solo existe con la feature `render` y tiene implementación por defecto, así que las apps existentes no cambian.
 - El esquema de escenas es versión `1` y no admite migraciones silenciosas (ADR-008).
 
+[0.2.0]: https://github.com/Bodepk/bodengine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Bodepk/bodengine/releases/tag/v0.1.0

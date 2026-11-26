@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H19 completados** y demo de `v0.1.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024), servicios 3D en C++ (ADR-025), documentos de escena y recarga desde C++ (ADR-026), escenas v2 con sprites, animación y prefabs (ADR-027) y diagnósticos, replay de input y hashes de estado (ADR-028). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H20 completados** y release `v0.2.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024), servicios 3D en C++ (ADR-025), documentos de escena y recarga desde C++ (ADR-026), escenas v2 con sprites, animación y prefabs (ADR-027), diagnósticos con replay de input y hashes de estado (ADR-028) y la publicación `v0.2.0` (ADR-029). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -130,7 +130,7 @@ build/cpp_sdk_template/Release/cpp_sdk_template.exe  # Windows
 # build/cpp_sdk_template/cpp_sdk_template            # Linux/macOS
 ```
 
-La versión del paquete es `0.1.0` y se solicita con `EXACT`: antes de 1.0, un cambio de versión puede romper la ABI C++. La configuración propaga las librerías del sistema que la staticlib Rust no declara por sí sola.
+La versión del paquete es `0.2.0` y se solicita con `EXACT`: antes de 1.0, un cambio de versión puede romper la ABI C++. La configuración propaga las librerías del sistema que la staticlib Rust no declara por sí sola.
 
 La API C++ también expone ratón, scroll y coordenadas de viewport (ADR-023): `mouse_state`, `cursor_position`, `cursor_ndc`, `screen_to_ndc` y `scroll_delta` son aditivos; `Game` ofrece `on_mouse`, `on_cursor` y `on_scroll` como virtuales opcionales. `winit` sigue confinado en `lunar_platform` y los píxeles físicos se convierten a NDC en Rust.
 
