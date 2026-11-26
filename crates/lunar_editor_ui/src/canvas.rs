@@ -69,6 +69,11 @@ pub(crate) enum CanvasDrag {
         pointer: Pos2,
         center: [f32; 2],
     },
+    Select {
+        start: Pos2,
+        current: Pos2,
+        additive: bool,
+    },
     Move {
         pointer: Pos2,
         originals: Vec<(u64, Transform)>,
@@ -92,10 +97,23 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
         ui.checkbox(&mut app.show_grid, "Rejilla");
         ui.checkbox(&mut app.snap, "Snap 0.25");
         ui.label(format!("Zoom {:.0}", app.zoom));
-        ui.label("Arrastra assets aquí · rueda: zoom · botón derecho: paneo");
+        ui.label(
+            "Arrastra assets aquí · arrastrar vacío: selección · F: encuadrar · rueda: zoom · derecho: paneo",
+        );
     });
 
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+    let current = View {
+        center: app.view_center,
+        zoom: app.zoom,
+    };
+    if !ui.ctx().egui_wants_keyboard_input() && ui.input(|input| input.key_pressed(egui::Key::F)) {
+        let items = collect_items(app, rect, current);
+        let fitted = fit_view(&items, rect, current, app.document.selection());
+        app.view_center = fitted.center;
+        app.zoom = fitted.zoom;
+    }
+
     let view = View {
         center: app.view_center,
         zoom: app.zoom,
@@ -112,12 +130,13 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
         paint_item(ui, item);
     }
     paint_selection(ui, &items);
+    paint_marquee(ui, &app.drag);
 
     let pointer = response.hover_pos();
     handle_zoom(app, ui, rect, pointer);
     handle_drop(app, ui, rect, pointer);
     handle_pointer(app, ui, &response, rect, view, pointer, &items);
-    commit_drag(app, ui);
+    commit_drag(app, ui, &items);
 }
 
 fn paint_grid(ui: &mut Ui, rect: Rect, view: View) {
@@ -260,6 +279,65 @@ fn paint_selection(ui: &mut Ui, items: &[DrawItem]) {
     }
 }
 
+/// Vista que encuadra la selección, o toda la escena si no hay selección.
+#[must_use]
+fn fit_view(items: &[DrawItem], rect: Rect, view: View, selection: &[u64]) -> View {
+    let targets: Vec<&DrawItem> = if selection.is_empty() {
+        items.iter().collect()
+    } else {
+        items
+            .iter()
+            .filter(|item| selection.contains(&item.id))
+            .collect()
+    };
+    let corners: Vec<Pos2> = targets
+        .iter()
+        .flat_map(|item| sprite_corners(item))
+        .collect();
+    if corners.is_empty() {
+        return View {
+            center: [0.0, 0.0],
+            zoom: 48.0,
+        };
+    }
+
+    let bounds = Rect::from_points(&corners);
+    let margin = Vec2::splat(24.0);
+    let available = Rect::from_min_max(rect.min + margin, rect.max - margin);
+    let zoom = (available.width().max(1.0) / bounds.width().max(1.0))
+        .min(available.height().max(1.0) / bounds.height().max(1.0))
+        .clamp(8.0, 512.0);
+    let center = screen_to_world(bounds.center(), rect, view);
+    View { center, zoom }
+}
+
+/// Entidades cuyo rectángulo toca el área de selección, en orden de dibujo.
+#[must_use]
+fn selection_in_rect(items: &[DrawItem], area: Rect) -> Vec<u64> {
+    items
+        .iter()
+        .filter(|item| Rect::from_points(&sprite_corners(item)).intersects(area))
+        .map(|item| item.id)
+        .collect()
+}
+
+fn paint_marquee(ui: &mut Ui, drag: &CanvasDrag) {
+    if let CanvasDrag::Select { start, current, .. } = drag {
+        let area = Rect::from_two_pos(*start, *current);
+        ui.painter().rect_filled(
+            area,
+            0.0,
+            Color32::from_rgba_premultiplied(90, 140, 200, 40),
+        );
+        ui.painter().rect_stroke(
+            area,
+            0.0,
+            Stroke::new(1.0, Color32::LIGHT_BLUE),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
 fn handle_zoom(app: &mut EditorApp, ui: &mut Ui, rect: Rect, pointer: Option<Pos2>) {
     let scroll = ui.input(|input| input.smooth_scroll_delta.y);
     if scroll == 0.0 {
@@ -388,6 +466,13 @@ fn handle_pointer(
                 })
                 .collect();
             app.drag = CanvasDrag::Move { pointer, originals };
+        } else {
+            let additive = ui.input(|input| input.modifiers.shift || input.modifiers.ctrl);
+            app.drag = CanvasDrag::Select {
+                start: pointer,
+                current: pointer,
+                additive,
+            };
         }
     }
 
@@ -402,6 +487,17 @@ fn handle_pointer(
                     center[0] - (pointer.x - start.x) / app.zoom,
                     center[1] + (pointer.y - start.y) / app.zoom,
                 ];
+            }
+        }
+        CanvasDrag::Select {
+            start, additive, ..
+        } => {
+            if let Some(pointer) = pointer {
+                app.drag = CanvasDrag::Select {
+                    start,
+                    current: pointer,
+                    additive,
+                };
             }
         }
         CanvasDrag::Move {
@@ -482,10 +578,30 @@ fn handle_pointer(
     }
 }
 
-fn commit_drag(app: &mut EditorApp, ui: &mut Ui) {
+fn commit_drag(app: &mut EditorApp, ui: &mut Ui, items: &[DrawItem]) {
     if !ui.input(|input| input.pointer.any_released()) {
         return;
     }
+    if let CanvasDrag::Select {
+        start,
+        current,
+        additive,
+    } = app.drag.clone()
+    {
+        let area = Rect::from_two_pos(start, current);
+        let mut selection = if additive {
+            app.document.selection().to_vec()
+        } else {
+            Vec::new()
+        };
+        for id in selection_in_rect(items, area) {
+            if !selection.contains(&id) {
+                selection.push(id);
+            }
+        }
+        app.document.select(&selection);
+    }
+
     let previews: Vec<(u64, Transform)> = app.preview.drain().collect();
     for (id, transform) in previews {
         let current = app
@@ -555,6 +671,71 @@ mod tests {
 
     fn rect() -> Rect {
         Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))
+    }
+
+    fn item(id: u64, center: Pos2) -> DrawItem {
+        DrawItem {
+            id,
+            transform: Transform::default(),
+            center,
+            half_screen: Vec2::splat(10.0),
+            texture: None,
+            label: String::new(),
+            selected: false,
+        }
+    }
+
+    #[test]
+    fn rectangular_selection_includes_intersecting_items() {
+        let items = [
+            item(1, Pos2::new(100.0, 100.0)),
+            item(2, Pos2::new(300.0, 100.0)),
+        ];
+        let area = Rect::from_min_max(Pos2::new(90.0, 90.0), Pos2::new(110.0, 110.0));
+        assert_eq!(selection_in_rect(&items, area), vec![1]);
+
+        let wide = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 200.0));
+        assert_eq!(selection_in_rect(&items, wide), vec![1, 2]);
+    }
+
+    #[test]
+    fn frame_centers_the_selection_and_fits_the_zoom() {
+        let items = [
+            item(1, Pos2::new(380.0, 280.0)),
+            item(2, Pos2::new(420.0, 320.0)),
+        ];
+        let view = View {
+            center: [0.0, 0.0],
+            zoom: 40.0,
+        };
+        let fitted = fit_view(&items, rect(), view, &[1, 2]);
+        let expected = screen_to_world(Pos2::new(400.0, 300.0), rect(), view);
+        assert!((fitted.center[0] - expected[0]).abs() < 1e-3);
+        assert!((fitted.center[1] - expected[1]).abs() < 1e-3);
+        assert!(fitted.zoom > 8.0 && fitted.zoom <= 512.0);
+
+        let all = fit_view(&items, rect(), view, &[]);
+        assert_eq!(all, fitted);
+    }
+
+    #[test]
+    fn frame_without_items_restores_a_sensible_view() {
+        let view = fit_view(
+            &[],
+            rect(),
+            View {
+                center: [5.0, 5.0],
+                zoom: 100.0,
+            },
+            &[],
+        );
+        assert_eq!(
+            view,
+            View {
+                center: [0.0, 0.0],
+                zoom: 48.0
+            }
+        );
     }
 
     #[test]
