@@ -15,6 +15,7 @@ use crate::play::{PlayState, dynamic_ids, floor_y, step_vertical};
 use crate::recent;
 use crate::status::{ConsoleFilter, LogEntry};
 use crate::tools::{EntityTemplate, TransformMode};
+use crate::view3d::{Camera3D, ViewMode};
 use crate::{hierarchy, inspector};
 
 /// Acción que espera a resolver el aviso de cambios sin guardar.
@@ -68,6 +69,8 @@ pub(crate) struct EditorApp {
     pub(crate) asset_folder: String,
     pub(crate) asset_kind_filter: Option<AssetKind>,
     pub(crate) selected_asset: Option<String>,
+    pub(crate) view_mode: ViewMode,
+    pub(crate) camera3d: Camera3D,
     pub(crate) view_center: [f32; 2],
     pub(crate) zoom: f32,
     pub(crate) show_grid: bool,
@@ -140,6 +143,8 @@ impl EditorApp {
             asset_folder: String::new(),
             asset_kind_filter: None,
             selected_asset: None,
+            view_mode: ViewMode::default(),
+            camera3d: Camera3D::default(),
             view_center: settings.center,
             zoom: settings.zoom,
             show_grid: settings.show_grid,
@@ -746,7 +751,10 @@ impl eframe::App for EditorApp {
             .size_range(layout::CONSOLE_RANGE.0..=layout::CONSOLE_RANGE.1)
             .default_size(layout::console_height(layout::CONSOLE_HEIGHT))
             .show(ui, |ui| crate::status::console_ui(self, ui));
-        egui::CentralPanel::default().show(ui, |ui| canvas_ui(self, ui));
+        egui::CentralPanel::default().show(ui, |ui| match self.view_mode {
+            ViewMode::TwoD => canvas_ui(self, ui),
+            ViewMode::ThreeD => crate::view3d::view3d_ui(self, ui),
+        });
         crate::dialogs::show(self, &ctx);
         crate::status::log_window(self, &ctx);
     }

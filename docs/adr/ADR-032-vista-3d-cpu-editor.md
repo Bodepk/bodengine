@@ -1,6 +1,6 @@
 # ADR-032: Vista 3D CPU en el editor
 
-- Estado: Propuesta
+- Estado: Aceptada
 - Fecha: 2026-11-26
 - Supersede parcialmente: el punto «vista 3D» declarado fuera de alcance en ADR-020
 - Nota: ADR-025 deja la presentación GPU de mallas para una decisión posterior. Esta ADR no la implementa.

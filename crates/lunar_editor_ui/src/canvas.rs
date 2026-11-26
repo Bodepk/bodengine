@@ -15,6 +15,7 @@ use crate::helpers::{
 };
 use crate::play::PlayState;
 use crate::tools::TransformMode;
+use crate::view3d::ViewMode;
 
 /// Vista ortográfica del lienzo: centro en mundo y píxeles por unidad.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +102,21 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
         preferences_changed |= ui.checkbox(&mut app.snap, "Snap 0.25").changed();
         ui.label(format!("Zoom {:.0}", app.zoom));
         ui.label(format!("Herramienta: {}", app.transform_mode.label()));
+        ui.separator();
+        if ui
+            .selectable_label(app.view_mode == ViewMode::TwoD, ViewMode::TwoD.label())
+            .clicked()
+        {
+            app.view_mode = ViewMode::TwoD;
+            app.drag = CanvasDrag::None;
+        }
+        if ui
+            .selectable_label(app.view_mode == ViewMode::ThreeD, ViewMode::ThreeD.label())
+            .clicked()
+        {
+            app.view_mode = ViewMode::ThreeD;
+            app.drag = CanvasDrag::None;
+        }
         ui.label("W mover · E rotar · R escalar · F encuadrar · rueda zoom · derecho paneo");
         if app.play_state != PlayState::Stopped {
             ui.label(format!(

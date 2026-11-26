@@ -21,6 +21,7 @@ mod settings;
 mod shortcuts;
 mod status;
 mod tools;
+mod view3d;
 
 use std::path::PathBuf;
 
