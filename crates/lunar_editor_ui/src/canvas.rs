@@ -149,13 +149,10 @@ fn collect_items(app: &EditorApp, rect: Rect, view: View) -> Vec<DrawItem> {
             .copied()
             .unwrap_or(entity.transform);
         let image = entity.components.iter().find_map(Component::asset_path);
-        let (dimensions, texture) = image.map_or(([32, 32], None), |asset| {
-            (
-                app.assets.dimensions(asset).unwrap_or([32, 32]),
-                app.assets.texture(asset).map(egui::TextureHandle::id),
-            )
-        });
-        let size = image_world_size(dimensions, transform.scale);
+        let dimensions = image.and_then(|asset| app.assets.dimensions(asset));
+        let texture =
+            image.and_then(|asset| app.assets.texture(asset).map(egui::TextureHandle::id));
+        let size = entity_world_size(dimensions, transform.scale);
         let center = world_to_screen(
             [transform.translation[0], transform.translation[1]],
             rect,
@@ -175,6 +172,14 @@ fn collect_items(app: &EditorApp, rect: Rect, view: View) -> Vec<DrawItem> {
         });
     }
     items
+}
+
+/// Tamaño en mundo de una entidad. Sin asset cargado se usa una celda de
+/// `PIXELS_PER_UNIT`, es decir 1×1 unidades antes de la escala, para que las
+/// entidades vacías también se puedan seleccionar en el lienzo.
+#[must_use]
+pub(crate) fn entity_world_size(dimensions: Option<[u32; 2]>, scale: [f32; 3]) -> [f32; 2] {
+    image_world_size(dimensions.unwrap_or([32, 32]), scale)
 }
 
 /// Cuatro esquinas de pantalla en orden TL, TR, BR, BL, con rotación aplicada.
@@ -525,18 +530,13 @@ fn entity_at(app: &EditorApp, pointer: Pos2, view: View, rect: Rect) -> Option<u
     let world = screen_to_world(pointer, rect, view);
     for entity in app.document.scene().entities.iter().rev() {
         let image = entity.components.iter().find_map(Component::asset_path);
-        let Some(asset) = image else {
-            continue;
-        };
-        let Some(dimensions) = app.assets.dimensions(asset) else {
-            continue;
-        };
+        let dimensions = image.and_then(|asset| app.assets.dimensions(asset));
         let transform = app
             .preview
             .get(&entity.id)
             .copied()
             .unwrap_or(entity.transform);
-        let size = image_world_size(dimensions, transform.scale);
+        let size = entity_world_size(dimensions, transform.scale);
         if contains_point(
             [transform.translation[0], transform.translation[1]],
             [size[0] * 0.5, size[1] * 0.5],
@@ -576,6 +576,15 @@ mod tests {
         };
         let up = world_to_screen([0.0, 1.0], rect(), view);
         assert!(up.y < rect().center().y);
+    }
+
+    #[test]
+    fn entities_without_assets_have_a_selectable_size() {
+        assert_eq!(entity_world_size(None, [2.0, 3.0, 1.0]), [2.0, 3.0]);
+        assert_eq!(
+            entity_world_size(Some([64, 32]), [1.0, 1.0, 1.0]),
+            [2.0, 1.0]
+        );
     }
 
     #[test]
