@@ -47,6 +47,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [028](ADR-028-diagnostics-replay.md) | Diagnósticos, replay de input y hashes de estado | Aceptada |
 | [029](ADR-029-release-0-2-0.md) | Publicación de `v0.2.0` | Aceptada |
 | [030](ADR-030-inspector-componentes.md) | Inspector completo y edición de componentes | Aceptada |
+| [031](ADR-031-preferencias-editor.md) | Preferencias persistentes del editor | Aceptada |
 
 ## Consecuencias
 
