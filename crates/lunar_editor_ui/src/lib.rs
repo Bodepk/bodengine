@@ -15,6 +15,7 @@ mod helpers;
 mod hierarchy;
 mod inspector;
 mod layout;
+mod play;
 mod recent;
 mod settings;
 mod shortcuts;

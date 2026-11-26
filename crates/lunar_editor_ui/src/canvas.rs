@@ -13,6 +13,7 @@ use crate::assets::ASSET_PAYLOAD_PREFIX;
 use crate::helpers::{
     angle_from_quaternion, contains_point, image_world_size, quaternion_from_angle, snap_to_grid,
 };
+use crate::play::PlayState;
 use crate::tools::TransformMode;
 
 /// Vista ortográfica del lienzo: centro en mundo y píxeles por unidad.
@@ -101,6 +102,35 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
         ui.label(format!("Zoom {:.0}", app.zoom));
         ui.label(format!("Herramienta: {}", app.transform_mode.label()));
         ui.label("W mover · E rotar · R escalar · F encuadrar · rueda zoom · derecho paneo");
+        if app.play_state != PlayState::Stopped {
+            ui.label(format!(
+                "Play {:.2}s · {}",
+                app.play_time,
+                app.play_state.label()
+            ));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if app.play_state != PlayState::Stopped && ui.button("■ Stop").clicked() {
+                app.stop_play();
+            }
+            match app.play_state {
+                PlayState::Stopped => {
+                    if ui.button("▶ Play").clicked() {
+                        app.play();
+                    }
+                }
+                PlayState::Playing => {
+                    if ui.button("⏸ Pausa").clicked() {
+                        app.toggle_pause();
+                    }
+                }
+                PlayState::Paused => {
+                    if ui.button("▶ Reanudar").clicked() {
+                        app.toggle_pause();
+                    }
+                }
+            }
+        });
     });
     if preferences_changed {
         app.save_settings();
@@ -149,9 +179,11 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
         );
     }
     handle_zoom(app, ui, rect, pointer);
-    handle_drop(app, ui, rect, pointer);
-    handle_pointer(app, ui, &response, rect, view, pointer, &items);
-    commit_drag(app, ui, &items);
+    if app.play_state == PlayState::Stopped {
+        handle_drop(app, ui, rect, pointer);
+        handle_pointer(app, ui, &response, rect, view, pointer, &items);
+        commit_drag(app, ui, &items);
+    }
 }
 
 fn paint_grid(ui: &mut Ui, rect: Rect, view: View) {

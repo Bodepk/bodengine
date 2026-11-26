@@ -14,6 +14,8 @@ pub(crate) struct ShortcutKeys {
     pub(crate) move_tool: bool,
     pub(crate) rotate_tool: bool,
     pub(crate) scale_tool: bool,
+    pub(crate) toggle_play: bool,
+    pub(crate) stop_play: bool,
 }
 
 /// Acciones resultantes de resolver un atajo.
@@ -29,6 +31,8 @@ pub(crate) struct ShortcutActions {
     pub(crate) move_tool: bool,
     pub(crate) rotate_tool: bool,
     pub(crate) scale_tool: bool,
+    pub(crate) toggle_play: bool,
+    pub(crate) stop_play: bool,
 }
 
 /// Resuelve las acciones. `Ctrl+Shift+S` guarda como y no sobrescribe la escena
@@ -48,6 +52,8 @@ pub(crate) fn resolve(keys: ShortcutKeys) -> ShortcutActions {
         move_tool,
         rotate_tool,
         scale_tool,
+        toggle_play,
+        stop_play,
     } = keys;
     let plain = !command && !shift;
     ShortcutActions {
@@ -61,6 +67,8 @@ pub(crate) fn resolve(keys: ShortcutKeys) -> ShortcutActions {
         move_tool: plain && move_tool,
         rotate_tool: plain && rotate_tool,
         scale_tool: plain && scale_tool,
+        toggle_play: plain && toggle_play,
+        stop_play: plain && stop_play,
     }
 }
 
@@ -189,6 +197,29 @@ mod tests {
             })
             .scale_tool
         );
+    }
+
+    #[test]
+    fn space_toggles_play_and_escape_stops() {
+        let toggle = resolve(ShortcutKeys {
+            toggle_play: true,
+            ..Default::default()
+        });
+        assert!(toggle.toggle_play);
+        assert!(!toggle.stop_play);
+        let stop = resolve(ShortcutKeys {
+            stop_play: true,
+            ..Default::default()
+        });
+        assert!(stop.stop_play);
+        assert!(!stop.toggle_play);
+        let modified = resolve(ShortcutKeys {
+            command: true,
+            toggle_play: true,
+            stop_play: true,
+            ..Default::default()
+        });
+        assert!(!modified.toggle_play && !modified.stop_play);
     }
 
     #[test]

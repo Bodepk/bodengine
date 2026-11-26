@@ -3,13 +3,14 @@ use std::path::PathBuf;
 
 use egui::{Context, Ui};
 use lunar_editor::{EditorCommand, EditorDocument, EditorError};
-use lunar_scenes::{Component, SceneError, Transform, normalize_asset_path};
+use lunar_scenes::{Component, Scene, SceneError, Transform, normalize_asset_path};
 
 use crate::assets::{AssetKind, AssetLibrary, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
 use crate::file_picker::{FilePicker, PickerMode, absolute_dir, parent_dir};
 use crate::helpers::{audio_component, collider2_component, image_component, next_entity_id};
 use crate::layout;
+use crate::play::{PlayState, dynamic_ids, step_vertical};
 use crate::recent;
 use crate::status::{ConsoleFilter, LogEntry};
 use crate::tools::{EntityTemplate, TransformMode};
@@ -71,6 +72,10 @@ pub(crate) struct EditorApp {
     pub(crate) transform_mode: TransformMode,
     pub(crate) drag: CanvasDrag,
     pub(crate) preview: HashMap<u64, Transform>,
+    pub(crate) play_state: PlayState,
+    pub(crate) play_time: f32,
+    pub(crate) play_velocities: HashMap<u64, f32>,
+    play_snapshot: Option<(Scene, Vec<u64>)>,
     pub(crate) pending_action: Option<PendingAction>,
     pub(crate) save_as_open: bool,
     pub(crate) save_as_buffer: String,
@@ -135,6 +140,10 @@ impl EditorApp {
             transform_mode: TransformMode::default(),
             drag: CanvasDrag::None,
             preview: HashMap::new(),
+            play_state: PlayState::Stopped,
+            play_time: 0.0,
+            play_velocities: HashMap::new(),
+            play_snapshot: None,
             pending_action: None,
             save_as_open: false,
             save_as_buffer: path_text.clone(),
@@ -152,6 +161,10 @@ impl EditorApp {
     }
 
     pub(crate) fn apply(&mut self, command: EditorCommand) {
+        if self.play_state != PlayState::Stopped {
+            self.set_status("Detén la simulación antes de editar");
+            return;
+        }
         match self.document.apply(command) {
             Ok(()) => {
                 self.revision += 1;
@@ -433,6 +446,99 @@ impl EditorApp {
         self.set_status(format!("Creada {} (#{id})", template.label()));
     }
 
+    /// Captura la escena y comienza la simulación local.
+    pub(crate) fn play(&mut self) {
+        if self.play_state != PlayState::Stopped {
+            return;
+        }
+        let snapshot = self.document.scene().clone();
+        let selection = self.document.selection().to_vec();
+        self.play_snapshot = Some((snapshot, selection));
+        self.play_velocities = dynamic_ids(self.document.scene())
+            .into_iter()
+            .map(|id| (id, 0.0))
+            .collect();
+        self.preview.clear();
+        self.drag = CanvasDrag::None;
+        self.play_time = 0.0;
+        self.play_state = PlayState::Playing;
+        self.set_status(format!(
+            "Play: {} cuerpo(s) dinámico(s)",
+            self.play_velocities.len()
+        ));
+    }
+
+    /// Alterna entre juego y pausa. Sin efecto con la simulación detenida.
+    pub(crate) fn toggle_pause(&mut self) {
+        match self.play_state {
+            PlayState::Playing => {
+                self.play_state = PlayState::Paused;
+                self.set_status("Play en pausa");
+            }
+            PlayState::Paused => {
+                self.play_state = PlayState::Playing;
+                self.set_status("Play reanudado");
+            }
+            PlayState::Stopped => {}
+        }
+    }
+
+    /// Restaura la instantánea y vuelve al modo edición.
+    pub(crate) fn stop_play(&mut self) {
+        if self.play_state == PlayState::Stopped {
+            return;
+        }
+        if let Some((scene, selection)) = self.play_snapshot.take() {
+            match EditorDocument::from_scene(scene) {
+                Ok(document) => {
+                    self.document = document;
+                    self.document.select(&selection);
+                }
+                Err(error) => self.set_status(format!("No se pudo restaurar: {error}")),
+            }
+        }
+        self.play_state = PlayState::Stopped;
+        self.play_time = 0.0;
+        self.play_velocities.clear();
+        self.preview.clear();
+        self.drag = CanvasDrag::None;
+        self.set_status("Play detenido; escena restaurada");
+    }
+
+    /// Avanza la simulación. Los cambios viven en `preview`, nunca en la escena.
+    pub(crate) fn tick_play(&mut self, dt: f32) {
+        if self.play_state != PlayState::Playing {
+            return;
+        }
+        let step = dt.clamp(0.0, crate::play::MAX_STEP);
+        self.play_time += step;
+        let ids: Vec<u64> = self.play_velocities.keys().copied().collect();
+        for id in ids {
+            let Some(original) = self
+                .document
+                .scene()
+                .entities
+                .iter()
+                .find(|entity| entity.id == id)
+                .map(|entity| entity.transform)
+            else {
+                continue;
+            };
+            let velocity = self.play_velocities.get(&id).copied().unwrap_or(0.0);
+            let current_y = self
+                .preview
+                .get(&id)
+                .map_or(original.translation[1], |transform| {
+                    transform.translation[1]
+                });
+            let (y, velocity) = step_vertical(current_y, velocity, step);
+            self.play_velocities.insert(id, velocity);
+            let mut transform = original;
+            transform.translation[1] = y;
+            self.preview.insert(id, transform);
+        }
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.egui_wants_keyboard_input() {
             return;
@@ -449,8 +555,23 @@ impl EditorApp {
             move_tool: input.key_pressed(egui::Key::W),
             rotate_tool: input.key_pressed(egui::Key::E),
             scale_tool: input.key_pressed(egui::Key::R),
+            toggle_play: input.key_pressed(egui::Key::Space),
+            stop_play: input.key_pressed(egui::Key::Escape),
         });
         let actions = crate::shortcuts::resolve(keys);
+
+        if actions.toggle_play {
+            match self.play_state {
+                PlayState::Stopped => self.play(),
+                _ => self.toggle_pause(),
+            }
+        }
+        if actions.stop_play {
+            self.stop_play();
+        }
+        if self.play_state != PlayState::Stopped {
+            return;
+        }
 
         if actions.save {
             self.save();
@@ -534,6 +655,8 @@ impl EditorApp {
 impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let dt = ctx.input(|input| input.stable_dt);
+        self.tick_play(dt);
         self.handle_shortcuts(&ctx);
         self.sync_inspector();
 
@@ -579,6 +702,20 @@ impl eframe::App for EditorApp {
 mod tests {
     use super::*;
     use crate::assets::AssetEntry;
+    use lunar_scenes::{BodyType, SceneEntity, Shape2D};
+
+    fn scene_with_dynamic_entity() -> Scene {
+        let mut entity = SceneEntity::new(1);
+        entity.name = Some("Dinámica".to_owned());
+        entity.transform.translation = [0.0, 3.0, 0.0];
+        entity.components.push(Component::Collider2D {
+            shape: Shape2D::Ball { radius: 0.5 },
+            body: BodyType::Dynamic,
+        });
+        let mut scene = Scene::new();
+        scene.entities.push(entity);
+        scene
+    }
 
     fn fresh_app() -> EditorApp {
         let ctx = Context::default();
@@ -627,6 +764,56 @@ mod tests {
         assert!(app.document.scene().entities.is_empty());
         assert!(app.status.starts_with("No hay asset"));
         assert!(!app.document.can_undo());
+    }
+
+    #[test]
+    fn play_previews_motion_and_stop_restores_the_scene() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = EditorDocument::from_scene(scene_with_dynamic_entity()).unwrap();
+        app.play();
+        assert_eq!(app.play_state, PlayState::Playing);
+        assert_eq!(app.play_velocities.len(), 1);
+
+        app.tick_play(0.1);
+        let moved = app.preview[&1].translation[1];
+        assert!(moved < 3.0);
+        assert!(
+            moved < 2.99,
+            "la caída debe acumularse, no ser de un solo paso"
+        );
+        assert_eq!(
+            app.document.scene().entities[0].transform.translation[1],
+            3.0
+        );
+
+        app.toggle_pause();
+        let frozen = app.preview[&1].translation[1];
+        app.tick_play(0.1);
+        assert_eq!(app.preview[&1].translation[1], frozen);
+        app.toggle_pause();
+        app.tick_play(0.1);
+        assert!(app.preview[&1].translation[1] < frozen);
+
+        app.stop_play();
+        assert_eq!(app.play_state, PlayState::Stopped);
+        assert!(app.preview.is_empty());
+        assert!(app.play_velocities.is_empty());
+        assert_eq!(
+            app.document.scene().entities[0].transform.translation[1],
+            3.0
+        );
+        assert!(!app.document.is_dirty());
+    }
+
+    #[test]
+    fn editing_is_blocked_while_playing() {
+        let mut app = fresh_app();
+        app.play();
+        app.apply(EditorCommand::CreateEntity { id: 99, name: None });
+        assert!(app.document.scene().entities.is_empty());
+        assert!(app.status.contains("Detén"));
+        app.stop_play();
     }
 
     #[test]
