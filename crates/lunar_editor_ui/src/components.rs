@@ -75,7 +75,7 @@ fn fields_ui(component: &mut Component, ui: &mut Ui, prefabs: &[String], changed
             ui.label("Animaciones");
             let mut remove_clip = None;
             for (clip_index, clip) in animations.iter_mut().enumerate() {
-                ui.collapsing(format!("Clip {} · {}", clip_index + 1, clip.name), |ui| {
+                clip_header(ui, clip_index, clip.name.clone(), |ui| {
                     text_ui(ui, "Nombre", &mut clip.name, changed);
                     *changed |= f32_ui(ui, "FPS", &mut clip.fps, 0.1);
                     if ui.checkbox(&mut clip.looping, "Bucle").changed() {
@@ -145,6 +145,18 @@ fn fields_ui(component: &mut Component, ui: &mut Ui, prefabs: &[String], changed
             }
         }
     }
+}
+
+/// Cabecera de un clip con id estable: el título incluye el nombre, que cambia
+/// mientras se escribe, y egui lo usaría como id si no se indicara `id_salt`.
+fn clip_header(ui: &mut Ui, index: usize, name: String, body: impl FnOnce(&mut Ui)) {
+    egui::CollapsingHeader::new(format!("Clip {} · {name}", index + 1))
+        .id_salt(clip_id_salt(index))
+        .show(ui, body);
+}
+
+fn clip_id_salt(index: usize) -> String {
+    format!("lunar-editor-clip-{index}")
 }
 
 fn asset_ui(ui: &mut Ui, asset: &mut String, changed: &mut bool) {
@@ -298,6 +310,51 @@ mod tests {
             fps: 8.0,
             looping: true,
         }
+    }
+
+    #[test]
+    fn clip_header_stays_open_while_its_name_changes() {
+        use egui::collapsing_header::CollapsingState;
+
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(400.0, 300.0),
+            )),
+            ..Default::default()
+        };
+        let mut header_id = None;
+
+        let mut first = ctx.run_pass(input(), |ctx| {
+            egui::Window::new("clips").show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    let id = ui.make_persistent_id(clip_id_salt(0));
+                    header_id = Some(id);
+                    let mut state = CollapsingState::load_with_default_open(ctx, id, false);
+                    state.set_open(true);
+                    state.store(ctx);
+                    clip_header(ui, 0, "clip1".to_owned(), |_| {});
+                });
+            });
+        });
+        first.textures_delta.clear();
+        let id = header_id.expect("la cabecera tiene id");
+        assert!(
+            CollapsingState::load(&ctx, id).is_some_and(|state| state.is_open()),
+            "la primera cabecera debe empezar abierta"
+        );
+
+        let mut second = ctx.run_pass(input(), |ctx| {
+            egui::Window::new("clips").show(ctx, |ui| {
+                clip_header(ui, 0, "clip2".to_owned(), |_| {});
+            });
+        });
+        second.textures_delta.clear();
+        assert!(
+            CollapsingState::load(&ctx, id).is_some_and(|state| state.is_open()),
+            "renombrar un clip no debe cerrar su cabecera"
+        );
     }
 
     #[test]

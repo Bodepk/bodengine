@@ -17,6 +17,10 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - La rotación del inspector se edita en grados (XYZ) y se convierte al cuaternión canónico en disco.
 - El volumen y el autoplay se editan por componente `Audio`; desaparecen los controles globales del inspector.
 
+### Corregido
+
+- La cabecera de cada clip de animación mantiene su estado abierto al renombrar el clip, usando un id estable en lugar del título dinámico.
+
 ## [0.2.0] — 2026-11-25
 
 Primera actualización de API desde `v0.1.0`: scripting C++ de primera clase, SDK instalable, servicios 3D y edición de escenas desde C++, escenas v2 y diagnósticos deterministas. La versión del workspace y la del SDK pasan a `0.2.0` (ADR-029).
