@@ -27,6 +27,14 @@ impl PendingAction {
     }
 }
 
+/// Componente que se está editando en el inspector (ADR-030).
+#[derive(Debug, Clone)]
+pub(crate) struct ComponentEdit {
+    pub(crate) id: u64,
+    pub(crate) index: usize,
+    pub(crate) component: Component,
+}
+
 #[derive(Debug)]
 pub(crate) struct EditorApp {
     pub(crate) document: EditorDocument,
@@ -36,9 +44,9 @@ pub(crate) struct EditorApp {
     pub(crate) asset_buffer: String,
     pub(crate) translation: [f32; 3],
     pub(crate) rotation: [f32; 4],
+    pub(crate) rotation_degrees: [f32; 3],
     pub(crate) scale: [f32; 3],
-    pub(crate) volume: f32,
-    pub(crate) autoplay: bool,
+    pub(crate) component_edit: Option<ComponentEdit>,
     synced_selection: Vec<u64>,
     synced_revision: u64,
     revision: u64,
@@ -88,9 +96,9 @@ impl EditorApp {
             asset_buffer: String::from("assets/sprite.png"),
             translation: [0.0; 3],
             rotation: [0.0, 0.0, 0.0, 1.0],
+            rotation_degrees: [0.0; 3],
             scale: [1.0; 3],
-            volume: 0.5,
-            autoplay: false,
+            component_edit: None,
             synced_selection: Vec::new(),
             synced_revision: 0,
             revision: 0,
@@ -362,7 +370,9 @@ impl EditorApp {
             self.name_buffer.clear();
             self.translation = [0.0; 3];
             self.rotation = [0.0, 0.0, 0.0, 1.0];
+            self.rotation_degrees = [0.0; 3];
             self.scale = [1.0; 3];
+            self.component_edit = None;
             return;
         };
         let Some(entity) = self
@@ -378,7 +388,20 @@ impl EditorApp {
         self.name_buffer = entity.name.unwrap_or_default();
         self.translation = entity.transform.translation;
         self.rotation = entity.transform.rotation;
+        self.rotation_degrees = crate::helpers::degrees_from_quaternion(entity.transform.rotation);
         self.scale = entity.transform.scale;
+
+        let active = self.component_edit.take().and_then(|edit| {
+            let current = self
+                .document
+                .scene()
+                .entities
+                .iter()
+                .find(|candidate| candidate.id == edit.id)?;
+            let component = current.components.get(edit.index)?.clone();
+            Some(ComponentEdit { component, ..edit })
+        });
+        self.component_edit = active;
     }
 }
 

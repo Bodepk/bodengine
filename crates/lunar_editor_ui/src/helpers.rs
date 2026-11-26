@@ -45,6 +45,20 @@ pub(crate) fn audio_component(asset: &str, volume: f32, autoplay: bool) -> Compo
     }
 }
 
+pub(crate) fn sprite_component(asset: &str) -> Component {
+    Component::Sprite {
+        asset: lunar_scenes::normalize_asset_path(asset),
+        meta: lunar_scenes::SpriteMeta::single_cell(),
+        animations: Vec::new(),
+    }
+}
+
+pub(crate) fn prefab_component(name: &str) -> Component {
+    Component::PrefabRef {
+        name: name.to_owned(),
+    }
+}
+
 pub(crate) fn collider2_component() -> Component {
     Component::Collider2D {
         shape: Shape2D::Ball { radius: 0.5 },
@@ -103,6 +117,34 @@ pub(crate) fn angle_from_quaternion(rotation: [f32; 4]) -> f32 {
 pub(crate) fn quaternion_from_angle(angle: f32) -> [f32; 4] {
     let half = angle * 0.5;
     [0.0, 0.0, half.sin(), half.cos()]
+}
+
+/// Cuaternión de los ángulos Euler XYZ en grados (ADR-030).
+///
+/// Componemos `qz * qy * qx`, así que una rotación solo en Z coincide con
+/// `quaternion_from_angle` y con el lienzo 2D.
+#[must_use]
+pub(crate) fn quaternion_from_degrees(degrees: [f32; 3]) -> [f32; 4] {
+    let [x, y, z] = degrees.map(|angle| angle.to_radians() * 0.5);
+    let (sx, cx) = x.sin_cos();
+    let (sy, cy) = y.sin_cos();
+    let (sz, cz) = z.sin_cos();
+    [
+        sx * cy * cz - cx * sy * sz,
+        cx * sy * cz + sx * cy * sz,
+        cx * cy * sz - sx * sy * cz,
+        cx * cy * cz + sx * sy * sz,
+    ]
+}
+
+/// Ángulos Euler XYZ en grados de un cuaternión (ADR-030).
+#[must_use]
+pub(crate) fn degrees_from_quaternion(rotation: [f32; 4]) -> [f32; 3] {
+    let [x, y, z, w] = rotation;
+    let roll = (2.0 * (w * x + y * z)).atan2(1.0 - 2.0 * (x * x + y * y));
+    let pitch = (2.0 * (w * y - z * x)).clamp(-1.0, 1.0).asin();
+    let yaw = (2.0 * (w * z + x * y)).atan2(1.0 - 2.0 * (y * y + z * z));
+    [roll.to_degrees(), pitch.to_degrees(), yaw.to_degrees()]
 }
 
 /// Tamaño en unidades de mundo de una imagen con su escala de entidad.
@@ -190,6 +232,29 @@ mod tests {
             let rotation = quaternion_from_angle(angle);
             assert!((angle_from_quaternion(rotation) - angle).abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn degrees_round_trip_through_quaternion() {
+        for degrees in [[0.0, 0.0, 0.0], [10.0, -20.0, 90.0], [-30.0, 45.0, 180.0]] {
+            let rotation = quaternion_from_degrees(degrees);
+            let recovered = degrees_from_quaternion(rotation);
+            for (left, right) in degrees.iter().zip(recovered) {
+                let difference = (left - right + 540.0) % 360.0 - 180.0;
+                assert!(difference.abs() < 1e-3, "{degrees:?} -> {recovered:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn z_degrees_match_the_canvas_angle() {
+        let degrees = [0.0, 0.0, 90.0];
+        assert_eq!(
+            quaternion_from_degrees(degrees),
+            quaternion_from_angle(90.0_f32.to_radians())
+        );
+        let recovered = degrees_from_quaternion(quaternion_from_degrees(degrees));
+        assert!((recovered[2] - 90.0).abs() < 1e-3);
     }
 
     #[test]

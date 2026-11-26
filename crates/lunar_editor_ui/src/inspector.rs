@@ -2,9 +2,11 @@ use egui::Ui;
 use lunar_editor::EditorCommand;
 use lunar_scenes::Transform;
 
-use crate::app::EditorApp;
+use crate::app::{ComponentEdit, EditorApp};
+use crate::components::component_editor_ui;
 use crate::helpers::{
     audio_component, collider2_component, component_label, drag_array, image_component,
+    prefab_component, quaternion_from_degrees, sprite_component,
 };
 
 pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
@@ -43,9 +45,10 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.separator();
     ui.label("Transformación local");
     let mut changed = drag_array(ui, "Posición", &mut app.translation, 0.05);
-    changed |= drag_array(ui, "Rotación", &mut app.rotation, 0.01);
+    changed |= drag_array(ui, "Rotación (°)", &mut app.rotation_degrees, 1.0);
     changed |= drag_array(ui, "Escala", &mut app.scale, 0.05);
     if changed {
+        app.rotation = quaternion_from_degrees(app.rotation_degrees);
         app.apply(EditorCommand::SetTransform {
             id,
             transform: Transform {
@@ -103,15 +106,28 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.heading("Componentes");
     let mut remove_index = None;
     for (index, component) in entity.components.iter().enumerate() {
-        let clicked = ui
+        let active = app
+            .component_edit
+            .as_ref()
+            .is_some_and(|edit| edit.id == id && edit.index == index);
+        let (select, remove) = ui
             .horizontal(|ui| {
-                ui.label(component_label(component));
-                ui.button("×").clicked()
+                (
+                    ui.selectable_label(active, component_label(component))
+                        .clicked(),
+                    ui.button("×").clicked(),
+                )
             })
             .inner;
-        if clicked {
+        if select {
+            app.component_edit = Some(ComponentEdit {
+                id,
+                index,
+                component: component.clone(),
+            });
+        }
+        if remove {
             remove_index = Some(index);
-            break;
         }
     }
     if let Some(index) = remove_index {
@@ -130,12 +146,18 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
                 component: image_component(&app.asset_buffer),
             });
         }
+        if ui.button("+ Sprite").clicked() {
+            app.apply(EditorCommand::AddComponent {
+                id,
+                component: sprite_component(&app.asset_buffer),
+            });
+        }
     });
     ui.horizontal(|ui| {
         if ui.button("+ Audio").clicked() {
             app.apply(EditorCommand::AddComponent {
                 id,
-                component: audio_component(&app.asset_buffer, app.volume, app.autoplay),
+                component: audio_component(&app.asset_buffer, 0.5, false),
             });
         }
         if ui.button("+ Col2D").clicked() {
@@ -144,7 +166,17 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
                 component: collider2_component(),
             });
         }
+        if ui.button("+ Prefab").clicked() {
+            match app.document.scene().prefabs.first() {
+                Some(prefab) => {
+                    let component = prefab_component(&prefab.name);
+                    app.apply(EditorCommand::AddComponent { id, component });
+                }
+                None => app.status = String::from("No hay prefabs en la escena"),
+            }
+        }
     });
-    ui.add(egui::Slider::new(&mut app.volume, 0.0..=1.0).text("Volumen"));
-    ui.checkbox(&mut app.autoplay, "Autoplay");
+
+    ui.separator();
+    component_editor_ui(app, ui);
 }

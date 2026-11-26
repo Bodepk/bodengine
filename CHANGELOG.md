@@ -9,6 +9,13 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - El editor gráfico pide confirmación antes de descartar cambios sin guardar al crear una escena nueva o abrir otra, con opciones de guardar, no guardar o cancelar.
 - «Guardar como» en la barra de herramientas y desplegable de escenas recientes (hasta ocho rutas), persistido como texto plano en el directorio de configuración del usuario sin dependencias nuevas.
 - Icono de la ventana y de la barra de tareas fijado en el repositorio para `lunar_editor_ui`, en lugar de depender del valor por defecto de eframe.
+- Inspector completo de componentes v2 (ADR-030): edición de `SpriteMeta`, clips de animación y sus fotogramas, `PrefabRef`, colisionadores 2D/3D y rutas de asset; botones para añadir `Sprite` y `Prefab`.
+- Comando `SetComponent { id, index, component }` en `lunar_editor`, validado y deshecho como los demás comandos.
+
+### Cambiado
+
+- La rotación del inspector se edita en grados (XYZ) y se convierte al cuaternión canónico en disco.
+- El volumen y el autoplay se editan por componente `Audio`; desaparecen los controles globales del inspector.
 
 ## [0.2.0] — 2026-11-25
 

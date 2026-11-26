@@ -7,6 +7,7 @@
 mod app;
 mod assets;
 mod canvas;
+mod components;
 mod dialogs;
 mod helpers;
 mod hierarchy;
