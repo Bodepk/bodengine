@@ -3,6 +3,7 @@ use lunar_editor::EditorCommand;
 
 use crate::app::EditorApp;
 use crate::assets::ENTITY_PAYLOAD_PREFIX;
+use crate::file_picker::PickerMode;
 use crate::helpers::{child_ids, next_entity_id, root_ids};
 
 pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
@@ -18,6 +19,9 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
                 .hint_text("scene.json")
                 .desired_width(260.0),
         );
+        if ui.button("Buscar…").clicked() {
+            app.begin_picker(PickerMode::Open);
+        }
         if ui.button("Abrir").clicked() {
             app.request_open();
         }

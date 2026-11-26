@@ -7,6 +7,7 @@ use lunar_scenes::{Component, SceneError, Transform, normalize_asset_path};
 
 use crate::assets::{AssetKind, AssetLibrary, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
+use crate::file_picker::{FilePicker, PickerMode, parent_dir};
 use crate::helpers::{audio_component, image_component, next_entity_id};
 use crate::recent;
 use crate::{hierarchy, inspector};
@@ -64,6 +65,7 @@ pub(crate) struct EditorApp {
     pub(crate) pending_action: Option<PendingAction>,
     pub(crate) save_as_open: bool,
     pub(crate) save_as_buffer: String,
+    pub(crate) picker: Option<FilePicker>,
     pub(crate) recent: Vec<String>,
 }
 
@@ -119,6 +121,7 @@ impl EditorApp {
             pending_action: None,
             save_as_open: false,
             save_as_buffer: path_text.clone(),
+            picker: None,
             recent: recent::load(),
         }
     }
@@ -215,6 +218,21 @@ impl EditorApp {
     pub(crate) fn begin_save_as(&mut self) {
         self.save_as_buffer = self.path_text.clone();
         self.save_as_open = true;
+    }
+
+    /// Abre el explorador en la carpeta de la ruta correspondiente.
+    pub(crate) fn begin_picker(&mut self, mode: PickerMode) {
+        let text = match mode {
+            PickerMode::Open => self.path_text.clone(),
+            PickerMode::Save => self.save_as_buffer.clone(),
+        };
+        let path = PathBuf::from(&text);
+        let directory = parent_dir(&path);
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.picker = Some(FilePicker::new(mode, directory, name));
     }
 
     pub(crate) fn commit_save_as(&mut self, path_text: String) {

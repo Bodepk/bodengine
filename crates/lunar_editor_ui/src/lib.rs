@@ -10,6 +10,7 @@ mod canvas;
 mod components;
 mod config;
 mod dialogs;
+mod file_picker;
 mod helpers;
 mod hierarchy;
 mod inspector;

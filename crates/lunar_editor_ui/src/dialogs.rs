@@ -13,6 +13,7 @@ use crate::app::EditorApp;
 pub(crate) fn show(app: &mut EditorApp, ctx: &Context) {
     unsaved_changes(app, ctx);
     save_as(app, ctx);
+    crate::file_picker::show(app, ctx);
 }
 
 fn centered(title: &str) -> egui::Window<'_> {
@@ -75,6 +76,9 @@ fn save_as(app: &mut EditorApp, ctx: &Context) {
         );
         ui.add_space(8.0);
         ui.horizontal(|ui| {
+            if ui.button("Buscar…").clicked() {
+                app.begin_picker(crate::file_picker::PickerMode::Save);
+            }
             accept = ui.button("Guardar").clicked();
             cancel = ui.button("Cancelar").clicked();
         });
