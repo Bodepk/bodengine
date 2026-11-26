@@ -8,10 +8,11 @@ use lunar_scenes::{Component, SceneError, Transform, normalize_asset_path};
 use crate::assets::{AssetKind, AssetLibrary, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
 use crate::file_picker::{FilePicker, PickerMode, absolute_dir, parent_dir};
-use crate::helpers::{audio_component, image_component, next_entity_id};
+use crate::helpers::{audio_component, collider2_component, image_component, next_entity_id};
 use crate::layout;
 use crate::recent;
 use crate::status::{ConsoleFilter, LogEntry};
+use crate::tools::{EntityTemplate, TransformMode};
 use crate::{hierarchy, inspector};
 
 /// Acción que espera a resolver el aviso de cambios sin guardar.
@@ -63,6 +64,7 @@ pub(crate) struct EditorApp {
     pub(crate) zoom: f32,
     pub(crate) show_grid: bool,
     pub(crate) snap: bool,
+    pub(crate) transform_mode: TransformMode,
     pub(crate) drag: CanvasDrag,
     pub(crate) preview: HashMap<u64, Transform>,
     pub(crate) pending_action: Option<PendingAction>,
@@ -122,6 +124,7 @@ impl EditorApp {
             zoom: settings.zoom,
             show_grid: settings.show_grid,
             snap: settings.snap,
+            transform_mode: TransformMode::default(),
             drag: CanvasDrag::None,
             preview: HashMap::new(),
             pending_action: None,
@@ -372,6 +375,56 @@ impl EditorApp {
         self.set_status(format!("Creada entidad #{id} desde {asset}"));
     }
 
+    /// Crea una entidad desde una plantilla, usando el primer asset del panel
+    /// cuando la plantilla lo necesita. Todo pasa por `EditorDocument::apply`.
+    pub(crate) fn create_from_template(&mut self, template: EntityTemplate) {
+        let component = match template.asset_kind() {
+            Some(kind) => {
+                let asset = self
+                    .assets
+                    .entries
+                    .iter()
+                    .find(|entry| entry.kind == kind)
+                    .map(|entry| entry.path.clone());
+                let Some(asset) = asset else {
+                    let kind_name = match kind {
+                        AssetKind::Image => "imagen",
+                        AssetKind::Audio => "audio",
+                        AssetKind::Mesh => "malla",
+                    };
+                    self.set_status(format!(
+                        "No hay asset de {} en {}",
+                        kind_name,
+                        self.assets.root.display()
+                    ));
+                    return;
+                };
+                Some(match kind {
+                    AssetKind::Image => image_component(&asset),
+                    AssetKind::Audio => audio_component(&asset, 0.5, false),
+                    AssetKind::Mesh => Component::Mesh {
+                        asset: normalize_asset_path(&asset),
+                        primitive: None,
+                    },
+                })
+            }
+            None => match template {
+                EntityTemplate::Collider2D => Some(collider2_component()),
+                _ => None,
+            },
+        };
+
+        let id = next_entity_id(self.document.scene());
+        self.apply(EditorCommand::CreateEntity {
+            id,
+            name: Some(template.name(id)),
+        });
+        if let Some(component) = component {
+            self.apply(EditorCommand::AddComponent { id, component });
+        }
+        self.set_status(format!("Creada {} (#{id})", template.label()));
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.egui_wants_keyboard_input() {
             return;
@@ -385,6 +438,9 @@ impl EditorApp {
             redo: input.key_pressed(egui::Key::Y),
             delete: input.key_pressed(egui::Key::Delete),
             duplicate: input.key_pressed(egui::Key::D),
+            move_tool: input.key_pressed(egui::Key::W),
+            rotate_tool: input.key_pressed(egui::Key::E),
+            scale_tool: input.key_pressed(egui::Key::R),
         });
         let actions = crate::shortcuts::resolve(keys);
 
@@ -408,6 +464,15 @@ impl EditorApp {
         }
         if actions.duplicate {
             self.duplicate_selected();
+        }
+        if actions.move_tool {
+            self.transform_mode = TransformMode::Move;
+        }
+        if actions.rotate_tool {
+            self.transform_mode = TransformMode::Rotate;
+        }
+        if actions.scale_tool {
+            self.transform_mode = TransformMode::Scale;
         }
     }
 
@@ -499,5 +564,85 @@ impl eframe::App for EditorApp {
         egui::CentralPanel::default().show(ui, |ui| canvas_ui(self, ui));
         crate::dialogs::show(self, &ctx);
         crate::status::log_window(self, &ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assets::AssetEntry;
+
+    fn fresh_app() -> EditorApp {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = EditorDocument::new();
+        app.assets.entries.clear();
+        app
+    }
+
+    #[test]
+    fn the_move_tool_is_active_on_startup() {
+        let app = fresh_app();
+        assert_eq!(app.transform_mode, TransformMode::Move);
+    }
+
+    #[test]
+    fn templates_create_entities_through_apply() {
+        let mut app = fresh_app();
+        app.assets.entries.push(AssetEntry {
+            path: "images/hero.png".to_owned(),
+            kind: AssetKind::Image,
+        });
+        app.create_from_template(EntityTemplate::Empty);
+        app.create_from_template(EntityTemplate::Sprite);
+        app.create_from_template(EntityTemplate::Collider2D);
+        app.create_from_template(EntityTemplate::Camera2D);
+        let entities = &app.document.scene().entities;
+        assert_eq!(entities.len(), 4);
+        assert_eq!(entities[0].name.as_deref(), Some("Entidad 1"));
+        assert!(
+            matches!(entities[1].components.first(), Some(Component::Image { asset }) if asset == "images/hero.png")
+        );
+        assert!(matches!(
+            entities[2].components.first(),
+            Some(Component::Collider2D { .. })
+        ));
+        assert_eq!(entities[3].name.as_deref(), Some("Cámara 2D 4"));
+        assert!(entities[3].components.is_empty());
+        assert!(app.document.can_undo());
+    }
+
+    #[test]
+    fn asset_templates_fail_without_mutating_the_scene() {
+        let mut app = fresh_app();
+        app.create_from_template(EntityTemplate::Audio);
+        assert!(app.document.scene().entities.is_empty());
+        assert!(app.status.starts_with("No hay asset"));
+        assert!(!app.document.can_undo());
+    }
+
+    #[test]
+    fn tool_keys_switch_the_active_mode() {
+        let ctx = Context::default();
+        let mut app = fresh_app();
+        for (key, expected) in [
+            (egui::Key::E, TransformMode::Rotate),
+            (egui::Key::R, TransformMode::Scale),
+            (egui::Key::W, TransformMode::Move),
+        ] {
+            let input = egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            };
+            let mut output = ctx.run_pass(input, |ctx| app.handle_shortcuts(ctx));
+            output.textures_delta.clear();
+            assert_eq!(app.transform_mode, expected);
+        }
     }
 }

@@ -4,7 +4,8 @@ use lunar_editor::EditorCommand;
 use crate::app::EditorApp;
 use crate::assets::ENTITY_PAYLOAD_PREFIX;
 use crate::file_picker::PickerMode;
-use crate::helpers::{child_ids, next_entity_id, root_ids};
+use crate::helpers::{child_ids, root_ids};
+use crate::tools::EntityTemplate;
 
 pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
@@ -74,13 +75,14 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
 pub(crate) fn hierarchy_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.heading("Jerarquía");
     ui.horizontal(|ui| {
-        if ui.button("+ Entidad").clicked() {
-            let id = next_entity_id(app.document.scene());
-            app.apply(EditorCommand::CreateEntity {
-                id,
-                name: Some(format!("Entidad {id}")),
-            });
-        }
+        ui.menu_button("+ Crear", |ui| {
+            for template in EntityTemplate::ALL {
+                if ui.button(template.label()).clicked() {
+                    app.create_from_template(template);
+                    ui.close();
+                }
+            }
+        });
         let has_selection = !app.document.selection().is_empty();
         if ui
             .add_enabled(has_selection, Button::new("Borrar"))

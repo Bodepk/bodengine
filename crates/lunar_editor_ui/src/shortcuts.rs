@@ -11,6 +11,9 @@ pub(crate) struct ShortcutKeys {
     pub(crate) redo: bool,
     pub(crate) delete: bool,
     pub(crate) duplicate: bool,
+    pub(crate) move_tool: bool,
+    pub(crate) rotate_tool: bool,
+    pub(crate) scale_tool: bool,
 }
 
 /// Acciones resultantes de resolver un atajo.
@@ -23,10 +26,14 @@ pub(crate) struct ShortcutActions {
     pub(crate) redo: bool,
     pub(crate) delete: bool,
     pub(crate) duplicate: bool,
+    pub(crate) move_tool: bool,
+    pub(crate) rotate_tool: bool,
+    pub(crate) scale_tool: bool,
 }
 
 /// Resuelve las acciones. `Ctrl+Shift+S` guarda como y no sobrescribe la escena
-/// actual, y `Ctrl+Shift+Z` rehace en lugar de deshacer.
+/// actual, y `Ctrl+Shift+Z` rehace en lugar de deshacer. `W`/`E`/`R` cambian la
+/// herramienta solo sin modificadores, para no pisar los atajos con `Ctrl`.
 #[must_use]
 pub(crate) fn resolve(keys: ShortcutKeys) -> ShortcutActions {
     let ShortcutKeys {
@@ -38,7 +45,11 @@ pub(crate) fn resolve(keys: ShortcutKeys) -> ShortcutActions {
         redo,
         delete,
         duplicate,
+        move_tool,
+        rotate_tool,
+        scale_tool,
     } = keys;
+    let plain = !command && !shift;
     ShortcutActions {
         save: command && !shift && save,
         save_as: command && shift && save,
@@ -47,6 +58,9 @@ pub(crate) fn resolve(keys: ShortcutKeys) -> ShortcutActions {
         redo: command && ((shift && undo) || redo),
         delete,
         duplicate: command && duplicate,
+        move_tool: plain && move_tool,
+        rotate_tool: plain && rotate_tool,
+        scale_tool: plain && scale_tool,
     }
 }
 
@@ -150,5 +164,46 @@ mod tests {
             })
             .duplicate
         );
+    }
+
+    #[test]
+    fn w_e_r_switch_the_tool_without_modifiers() {
+        let moved = resolve(ShortcutKeys {
+            move_tool: true,
+            ..Default::default()
+        });
+        assert!(moved.move_tool);
+        assert!(!moved.rotate_tool);
+        assert!(!moved.scale_tool);
+        assert!(
+            resolve(ShortcutKeys {
+                rotate_tool: true,
+                ..Default::default()
+            })
+            .rotate_tool
+        );
+        assert!(
+            resolve(ShortcutKeys {
+                scale_tool: true,
+                ..Default::default()
+            })
+            .scale_tool
+        );
+    }
+
+    #[test]
+    fn tool_shortcuts_ignore_modifiers() {
+        let keys = ShortcutKeys {
+            command: true,
+            move_tool: true,
+            ..Default::default()
+        };
+        assert!(!resolve(keys).move_tool);
+        let keys = ShortcutKeys {
+            shift: true,
+            rotate_tool: true,
+            ..Default::default()
+        };
+        assert!(!resolve(keys).rotate_tool);
     }
 }

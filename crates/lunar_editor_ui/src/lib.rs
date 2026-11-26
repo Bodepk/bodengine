@@ -19,6 +19,7 @@ mod recent;
 mod settings;
 mod shortcuts;
 mod status;
+mod tools;
 
 use std::path::PathBuf;
 

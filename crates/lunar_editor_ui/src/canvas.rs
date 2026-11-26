@@ -13,6 +13,7 @@ use crate::assets::ASSET_PAYLOAD_PREFIX;
 use crate::helpers::{
     angle_from_quaternion, contains_point, image_world_size, quaternion_from_angle, snap_to_grid,
 };
+use crate::tools::TransformMode;
 
 /// Vista ortográfica del lienzo: centro en mundo y píxeles por unidad.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -98,9 +99,8 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
         preferences_changed |= ui.checkbox(&mut app.show_grid, "Rejilla").changed();
         preferences_changed |= ui.checkbox(&mut app.snap, "Snap 0.25").changed();
         ui.label(format!("Zoom {:.0}", app.zoom));
-        ui.label(
-            "Arrastra assets aquí · arrastrar vacío: selección · F: encuadrar · rueda: zoom · derecho: paneo",
-        );
+        ui.label(format!("Herramienta: {}", app.transform_mode.label()));
+        ui.label("W mover · E rotar · R escalar · F encuadrar · rueda zoom · derecho paneo");
     });
     if preferences_changed {
         app.save_settings();
@@ -134,7 +134,7 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
     for item in &items {
         paint_item(ui, item);
     }
-    paint_selection(ui, &items);
+    paint_selection(ui, &items, app.transform_mode);
     paint_marquee(ui, &app.drag);
 
     let pointer = response.hover_pos();
@@ -271,7 +271,19 @@ fn paint_item(ui: &mut Ui, item: &DrawItem) {
     );
 }
 
-fn paint_selection(ui: &mut Ui, items: &[DrawItem]) {
+/// Tirador de rotación: 22 px por encima del borde superior.
+#[must_use]
+fn rotate_handle(bounds: Rect) -> Pos2 {
+    Pos2::new(bounds.center().x, bounds.min.y - 22.0)
+}
+
+/// Tirador de escala: 6 px a la derecha y abajo del borde inferior derecho.
+#[must_use]
+fn scale_handle(bounds: Rect) -> Pos2 {
+    bounds.max + Vec2::new(6.0, 6.0)
+}
+
+fn paint_selection(ui: &mut Ui, items: &[DrawItem], mode: TransformMode) {
     let selection_count = items.iter().filter(|item| item.selected).count();
     for item in items.iter().filter(|item| item.selected) {
         let bounds = Rect::from_points(&sprite_corners(item));
@@ -281,15 +293,34 @@ fn paint_selection(ui: &mut Ui, items: &[DrawItem]) {
             Stroke::new(1.5, Color32::LIGHT_BLUE),
             egui::StrokeKind::Outside,
         );
-        if selection_count == 1 {
-            let scale = bounds.max + Vec2::new(6.0, 6.0);
-            ui.painter().rect_filled(
-                Rect::from_center_size(scale, Vec2::splat(9.0)),
-                2.0,
-                Color32::LIGHT_GREEN,
-            );
-            let rotate = Pos2::new(bounds.center().x, bounds.min.y - 22.0);
-            ui.painter().circle_filled(rotate, 5.0, Color32::YELLOW);
+        if selection_count != 1 {
+            continue;
+        }
+        match mode {
+            TransformMode::Move => {
+                let center = bounds.center();
+                ui.painter().circle_filled(center, 5.0, Color32::LIGHT_BLUE);
+                let arm = 9.0;
+                ui.painter().line_segment(
+                    [center - Vec2::new(arm, 0.0), center + Vec2::new(arm, 0.0)],
+                    Stroke::new(1.5, Color32::LIGHT_BLUE),
+                );
+                ui.painter().line_segment(
+                    [center - Vec2::new(0.0, arm), center + Vec2::new(0.0, arm)],
+                    Stroke::new(1.5, Color32::LIGHT_BLUE),
+                );
+            }
+            TransformMode::Rotate => {
+                ui.painter()
+                    .circle_filled(rotate_handle(bounds), 5.0, Color32::YELLOW);
+            }
+            TransformMode::Scale => {
+                ui.painter().rect_filled(
+                    Rect::from_center_size(scale_handle(bounds), Vec2::splat(9.0)),
+                    2.0,
+                    Color32::LIGHT_GREEN,
+                );
+            }
         }
     }
 }
@@ -432,7 +463,7 @@ fn handle_pointer(
                 pointer,
                 center: app.view_center,
             };
-        } else if let Some((id, kind)) = handle_at(items, pointer) {
+        } else if let Some((id, kind)) = handle_at(items, pointer, app.transform_mode) {
             let transform = app
                 .document
                 .scene()
@@ -644,22 +675,23 @@ enum HandleKind {
     Rotate,
 }
 
-fn handle_at(items: &[DrawItem], pointer: Pos2) -> Option<(u64, HandleKind)> {
+fn handle_at(items: &[DrawItem], pointer: Pos2, mode: TransformMode) -> Option<(u64, HandleKind)> {
     let selected: Vec<_> = items.iter().filter(|item| item.selected).collect();
     if selected.len() != 1 {
         return None;
     }
     let item = selected[0];
     let bounds = Rect::from_points(&sprite_corners(item));
-    let scale = bounds.max + Vec2::new(6.0, 6.0);
-    if (pointer - scale).length() <= 8.0 {
-        return Some((item.id, HandleKind::Scale));
+    match mode {
+        TransformMode::Move => None,
+        TransformMode::Scale if (pointer - scale_handle(bounds)).length() <= 8.0 => {
+            Some((item.id, HandleKind::Scale))
+        }
+        TransformMode::Rotate if (pointer - rotate_handle(bounds)).length() <= 8.0 => {
+            Some((item.id, HandleKind::Rotate))
+        }
+        _ => None,
     }
-    let rotate = Pos2::new(bounds.center().x, bounds.min.y - 22.0);
-    if (pointer - rotate).length() <= 8.0 {
-        return Some((item.id, HandleKind::Rotate));
-    }
-    None
 }
 
 fn entity_at(app: &EditorApp, pointer: Pos2, view: View, rect: Rect) -> Option<u64> {
@@ -795,5 +827,33 @@ mod tests {
             zoom: 10.0,
         };
         assert_eq!(visible_world(rect(), view), [-40.0, -30.0, 40.0, 30.0]);
+    }
+
+    #[test]
+    fn handles_keep_their_screen_offsets() {
+        let bounds = Rect::from_min_max(Pos2::new(90.0, 90.0), Pos2::new(110.0, 110.0));
+        assert_eq!(rotate_handle(bounds), Pos2::new(100.0, 68.0));
+        assert_eq!(scale_handle(bounds), Pos2::new(116.0, 116.0));
+    }
+
+    #[test]
+    fn only_the_active_tool_has_a_draggable_handle() {
+        let mut selected = item(1, Pos2::new(100.0, 100.0));
+        selected.selected = true;
+        let items = [selected];
+        let scale = Pos2::new(116.0, 116.0);
+        let rotate = Pos2::new(100.0, 68.0);
+        assert_eq!(handle_at(&items, scale, TransformMode::Move), None);
+        assert_eq!(handle_at(&items, rotate, TransformMode::Move), None);
+        assert_eq!(
+            handle_at(&items, scale, TransformMode::Scale),
+            Some((1, HandleKind::Scale))
+        );
+        assert_eq!(handle_at(&items, rotate, TransformMode::Scale), None);
+        assert_eq!(
+            handle_at(&items, rotate, TransformMode::Rotate),
+            Some((1, HandleKind::Rotate))
+        );
+        assert_eq!(handle_at(&items, scale, TransformMode::Rotate), None);
     }
 }
