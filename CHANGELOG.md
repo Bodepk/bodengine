@@ -26,6 +26,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 
 - La cabecera de cada clip de animación mantiene su estado abierto al renombrar el clip, usando un id estable en lugar del título dinámico.
 - Las entidades sin asset cargado vuelven a ser seleccionables y arrastrables en el lienzo, con un cuerpo de 1×1 unidades antes de escala.
+- El explorador de escenas ya no se queda atrapado en `examples`: parte de una ruta absoluta, «Subir» llega hasta la raíz y la vista «Equipo» lista las unidades disponibles.
 
 ## [0.2.0] — 2026-11-25
 
