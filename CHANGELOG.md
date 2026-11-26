@@ -11,6 +11,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Icono de la ventana y de la barra de tareas fijado en el repositorio para `lunar_editor_ui`, en lugar de depender del valor por defecto de eframe.
 - Inspector completo de componentes v2 (ADR-030): edición de `SpriteMeta`, clips de animación y sus fotogramas, `PrefabRef`, colisionadores 2D/3D y rutas de asset; botones para añadir `Sprite` y `Prefab`.
 - Comando `SetComponent { id, index, component }` en `lunar_editor`, validado y deshecho como los demás comandos.
+- Selección rectangular en el lienzo (Shift/Ctrl para extenderla), atajo `F` para encuadrar la selección o toda la escena y coordenadas del cursor en unidades de mundo.
 
 ### Cambiado
 
@@ -20,6 +21,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 ### Corregido
 
 - La cabecera de cada clip de animación mantiene su estado abierto al renombrar el clip, usando un id estable en lugar del título dinámico.
+- Las entidades sin asset cargado vuelven a ser seleccionables y arrastrables en el lienzo, con un cuerpo de 1×1 unidades antes de escala.
 
 ## [0.2.0] — 2026-11-25
 

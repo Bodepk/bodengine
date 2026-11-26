@@ -133,6 +133,16 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
     paint_marquee(ui, &app.drag);
 
     let pointer = response.hover_pos();
+    if let Some(point) = pointer.filter(|point| rect.contains(*point)) {
+        let world = screen_to_world(point, rect, view);
+        ui.painter().text(
+            rect.min + Vec2::new(8.0, rect.height() - 8.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!("Cursor: {:.2}, {:.2}", world[0], world[1]),
+            egui::FontId::proportional(11.0),
+            Color32::from_gray(210),
+        );
+    }
     handle_zoom(app, ui, rect, pointer);
     handle_drop(app, ui, rect, pointer);
     handle_pointer(app, ui, &response, rect, view, pointer, &items);
