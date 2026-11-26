@@ -352,33 +352,37 @@ impl EditorApp {
         if ctx.egui_wants_keyboard_input() {
             return;
         }
-        let (save, undo, redo, delete, duplicate) = ctx.input(|input| {
-            let command = input.modifiers.ctrl || input.modifiers.command;
-            let shift = input.modifiers.shift;
-            (
-                command && input.key_pressed(egui::Key::S),
-                command && !shift && input.key_pressed(egui::Key::Z),
-                command
-                    && ((shift && input.key_pressed(egui::Key::Z))
-                        || input.key_pressed(egui::Key::Y)),
-                input.key_pressed(egui::Key::Delete),
-                command && input.key_pressed(egui::Key::D),
-            )
+        let keys = ctx.input(|input| crate::shortcuts::ShortcutKeys {
+            command: input.modifiers.ctrl || input.modifiers.command,
+            shift: input.modifiers.shift,
+            save: input.key_pressed(egui::Key::S),
+            open: input.key_pressed(egui::Key::O),
+            undo: input.key_pressed(egui::Key::Z),
+            redo: input.key_pressed(egui::Key::Y),
+            delete: input.key_pressed(egui::Key::Delete),
+            duplicate: input.key_pressed(egui::Key::D),
         });
+        let actions = crate::shortcuts::resolve(keys);
 
-        if save {
+        if actions.save {
             self.save();
         }
-        if undo {
+        if actions.save_as {
+            self.begin_save_as();
+        }
+        if actions.open {
+            self.request_open();
+        }
+        if actions.undo {
             self.undo();
         }
-        if redo {
+        if actions.redo {
             self.redo();
         }
-        if delete {
+        if actions.delete {
             self.delete_selected();
         }
-        if duplicate {
+        if actions.duplicate {
             self.duplicate_selected();
         }
     }

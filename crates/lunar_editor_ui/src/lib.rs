@@ -15,6 +15,7 @@ mod hierarchy;
 mod inspector;
 mod recent;
 mod settings;
+mod shortcuts;
 mod status;
 
 use std::path::PathBuf;
