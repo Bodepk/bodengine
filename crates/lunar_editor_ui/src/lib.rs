@@ -8,11 +8,13 @@ mod app;
 mod assets;
 mod canvas;
 mod components;
+mod config;
 mod dialogs;
 mod helpers;
 mod hierarchy;
 mod inspector;
 mod recent;
+mod settings;
 
 use std::path::PathBuf;
 

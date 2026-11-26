@@ -81,7 +81,8 @@ impl EditorApp {
             }
         };
         let path_text = path.to_string_lossy().into_owned();
-        let assets_root_text = String::from("examples/sprite_platformer/assets");
+        let settings = crate::settings::load();
+        let assets_root_text = settings.assets_root.clone();
         let mut assets = AssetLibrary::new(PathBuf::from(&assets_root_text));
         assets.reload(ctx);
         if let Some(error) = &assets.error {
@@ -105,10 +106,10 @@ impl EditorApp {
             status,
             assets,
             assets_root_text,
-            view_center: [0.0, 0.0],
-            zoom: 48.0,
-            show_grid: true,
-            snap: false,
+            view_center: settings.center,
+            zoom: settings.zoom,
+            show_grid: settings.show_grid,
+            snap: settings.snap,
             drag: CanvasDrag::None,
             preview: HashMap::new(),
             pending_action: None,
@@ -126,6 +127,19 @@ impl EditorApp {
             }
             Err(error) => self.status = error.to_string(),
         }
+    }
+
+    /// Persiste las preferencias de la GUI (ADR-031). Un fallo de escritura no
+    /// altera el estado del editor.
+    pub(crate) fn save_settings(&self) {
+        let settings = crate::settings::EditorSettings {
+            assets_root: self.assets_root_text.clone(),
+            center: self.view_center,
+            zoom: self.zoom,
+            show_grid: self.show_grid,
+            snap: self.snap,
+        };
+        let _ = crate::settings::save(&settings);
     }
 
     pub(crate) fn undo(&mut self) {
@@ -288,6 +302,7 @@ impl EditorApp {
                 )
             }
         }
+        self.save_settings();
     }
 
     pub(crate) fn create_entity_from_asset(&mut self, asset: &str, position: [f32; 2]) {

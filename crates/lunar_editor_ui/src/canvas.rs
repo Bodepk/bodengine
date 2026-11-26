@@ -93,14 +93,18 @@ pub(crate) enum CanvasDrag {
 }
 
 pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
+    let mut preferences_changed = false;
     ui.horizontal(|ui| {
-        ui.checkbox(&mut app.show_grid, "Rejilla");
-        ui.checkbox(&mut app.snap, "Snap 0.25");
+        preferences_changed |= ui.checkbox(&mut app.show_grid, "Rejilla").changed();
+        preferences_changed |= ui.checkbox(&mut app.snap, "Snap 0.25").changed();
         ui.label(format!("Zoom {:.0}", app.zoom));
         ui.label(
             "Arrastra assets aquí · arrastrar vacío: selección · F: encuadrar · rueda: zoom · derecho: paneo",
         );
     });
+    if preferences_changed {
+        app.save_settings();
+    }
 
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
     let current = View {
@@ -112,6 +116,7 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
         let fitted = fit_view(&items, rect, current, app.document.selection());
         app.view_center = fitted.center;
         app.zoom = fitted.zoom;
+        app.save_settings();
     }
 
     let view = View {
@@ -378,6 +383,7 @@ fn handle_zoom(app: &mut EditorApp, ui: &mut Ui, rect: Rect, pointer: Option<Pos
         app.view_center[1] + before[1] - after[1],
     ];
     app.zoom = zoom;
+    app.save_settings();
 }
 
 fn handle_drop(app: &mut EditorApp, ui: &mut Ui, rect: Rect, pointer: Option<Pos2>) {
@@ -592,6 +598,7 @@ fn commit_drag(app: &mut EditorApp, ui: &mut Ui, items: &[DrawItem]) {
     if !ui.input(|input| input.pointer.any_released()) {
         return;
     }
+    let was_pan = matches!(app.drag, CanvasDrag::Pan { .. });
     if let CanvasDrag::Select {
         start,
         current,
@@ -626,6 +633,9 @@ fn commit_drag(app: &mut EditorApp, ui: &mut Ui, items: &[DrawItem]) {
         }
     }
     app.drag = CanvasDrag::None;
+    if was_pan {
+        app.save_settings();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

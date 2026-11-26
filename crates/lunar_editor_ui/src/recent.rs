@@ -51,15 +51,11 @@ pub(crate) fn encode(entries: &[String]) -> String {
     text
 }
 
-/// Ruta del fichero de recientes, con raíz por sistema operativo.
+/// Ruta del fichero de recientes, con raíz por sistema operativo (ADR-031).
 #[must_use]
 pub(crate) fn file_path() -> PathBuf {
-    #[cfg(windows)]
-    let base = std::env::var_os("APPDATA").map(PathBuf::from);
-    #[cfg(not(windows))]
-    let base = std::env::var_os("HOME").map(PathBuf::from);
-
-    base.map(|dir| dir.join("LunarEditor").join("recent.txt"))
+    crate::config::config_dir()
+        .map(|dir| dir.join("recent.txt"))
         .unwrap_or_else(|| PathBuf::from("lunar_editor_recent.txt"))
 }
 
