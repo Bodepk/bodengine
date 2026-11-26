@@ -32,6 +32,52 @@ pub(crate) struct AssetEntry {
     pub(crate) kind: AssetKind,
 }
 
+impl AssetEntry {
+    /// Carpeta que contiene el asset, vacía si está en la raíz.
+    #[must_use]
+    pub(crate) fn folder(&self) -> &str {
+        self.path.rsplit_once('/').map_or("", |(folder, _)| folder)
+    }
+}
+
+/// Filtros del content browser. Son puros para poder probarlos sin GUI.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AssetFilter {
+    /// Carpeta exacta, o cadena vacía para todas.
+    pub(crate) folder: String,
+    /// Texto a buscar en la ruta, sin distinguir mayúsculas.
+    pub(crate) query: String,
+    /// Tipo, o `None` para todos.
+    pub(crate) kind: Option<AssetKind>,
+}
+
+impl AssetFilter {
+    #[must_use]
+    pub(crate) fn matches(&self, entry: &AssetEntry) -> bool {
+        (self.folder.is_empty() || entry.folder() == self.folder)
+            && (self.kind.is_none() || self.kind == Some(entry.kind))
+            && (self.query.is_empty()
+                || entry
+                    .path
+                    .to_ascii_lowercase()
+                    .contains(&self.query.to_ascii_lowercase()))
+    }
+
+    /// Carpetas presentes en la biblioteca, ordenadas y sin repetir.
+    #[must_use]
+    pub(crate) fn folders(entries: &[AssetEntry]) -> Vec<String> {
+        let mut folders: Vec<String> = entries
+            .iter()
+            .map(AssetEntry::folder)
+            .filter(|folder| !folder.is_empty())
+            .map(str::to_owned)
+            .collect();
+        folders.sort();
+        folders.dedup();
+        folders
+    }
+}
+
 /// Clasifica un archivo por extensión; devuelve `None` si no es un asset soportado.
 #[must_use]
 pub(crate) fn classify_asset(path: &Path) -> Option<AssetKind> {
@@ -178,15 +224,83 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
     if let Some(error) = &app.assets.error {
         ui.colored_label(Color32::RED, error);
     }
-    ui.label(format!("{} asset(s)", app.assets.entries.len()));
+
+    let folders = AssetFilter::folders(&app.assets.entries);
+    let folder_label = if app.asset_folder.is_empty() {
+        "Todas".to_owned()
+    } else {
+        app.asset_folder.clone()
+    };
+    ui.horizontal(|ui| {
+        ui.label("Carpeta");
+        egui::ComboBox::from_id_salt("asset-folder")
+            .selected_text(folder_label.clone())
+            .width(120.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut app.asset_folder, String::new(), "Todas");
+                for folder in &folders {
+                    ui.selectable_value(&mut app.asset_folder, folder.clone(), folder.as_str());
+                }
+            });
+    });
+    ui.add(
+        egui::TextEdit::singleline(&mut app.asset_search)
+            .hint_text("Buscar…")
+            .desired_width(210.0),
+    );
+    let mut kind = app.asset_kind_filter;
+    ui.horizontal(|ui| {
+        if ui.selectable_label(kind.is_none(), "Todo").clicked() {
+            kind = None;
+        }
+        if ui
+            .selectable_label(kind == Some(AssetKind::Image), "Img")
+            .clicked()
+        {
+            kind = Some(AssetKind::Image);
+        }
+        if ui
+            .selectable_label(kind == Some(AssetKind::Audio), "Audio")
+            .clicked()
+        {
+            kind = Some(AssetKind::Audio);
+        }
+        if ui
+            .selectable_label(kind == Some(AssetKind::Mesh), "Malla")
+            .clicked()
+        {
+            kind = Some(AssetKind::Mesh);
+        }
+    });
+    app.asset_kind_filter = kind;
+
+    let filter = AssetFilter {
+        folder: app.asset_folder.clone(),
+        query: app.asset_search.clone(),
+        kind: app.asset_kind_filter,
+    };
+    let visible: Vec<AssetEntry> = app
+        .assets
+        .entries
+        .iter()
+        .filter(|entry| filter.matches(entry))
+        .cloned()
+        .collect();
+    ui.label(format!(
+        "{} de {} asset(s)",
+        visible.len(),
+        app.assets.entries.len()
+    ));
     ui.separator();
 
     egui::ScrollArea::vertical().show(ui, |ui| {
-        let entries = app.assets.entries.clone();
-        for entry in entries {
+        for entry in &visible {
             let (rect, response) =
                 ui.allocate_exact_size(Vec2::new(224.0, 46.0), Sense::click_and_drag());
-            let background = if response.hovered() {
+            let selected = app.selected_asset.as_deref() == Some(entry.path.as_str());
+            let background = if selected {
+                Color32::from_rgb(50, 70, 100)
+            } else if response.hovered() {
                 Color32::from_gray(60)
             } else {
                 Color32::from_gray(42)
@@ -236,6 +350,12 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
                 );
             }
 
+            if response.clicked() {
+                app.selected_asset = Some(entry.path.clone());
+            }
+            if response.double_clicked() {
+                app.create_entity_from_asset(&entry.path, app.view_center);
+            }
             if response.drag_started() {
                 egui::DragAndDrop::set_payload(
                     ui.ctx(),
@@ -245,11 +365,40 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
             response.on_hover_text(&entry.path);
         }
     });
+
+    ui.separator();
+    let selected = app
+        .selected_asset
+        .clone()
+        .filter(|path| app.assets.kind(path).is_some());
+    match selected {
+        Some(path) => {
+            ui.label(format!("Seleccionado: {path}"));
+            let kind = match app.assets.kind(&path) {
+                Some(AssetKind::Image) => "imagen",
+                Some(AssetKind::Audio) => "audio",
+                Some(AssetKind::Mesh) => "malla",
+                None => "desconocido",
+            };
+            ui.label(format!("Tipo: {kind}"));
+            if let Some(dimensions) = app.assets.dimensions(&path) {
+                ui.label(format!("{}×{} px", dimensions[0], dimensions[1]));
+            }
+            if ui.button("Crear en el centro").clicked() {
+                let center = app.view_center;
+                app.create_entity_from_asset(&path, center);
+            }
+        }
+        None => {
+            ui.label("Sin asset seleccionado");
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::Context;
 
     #[test]
     fn classifies_supported_extensions() {
@@ -272,5 +421,101 @@ mod tests {
             Some("sprites/frog.png")
         );
         assert_eq!(relative_asset_path(root, Path::new("other/frog.png")), None);
+    }
+
+    #[test]
+    fn folders_are_sorted_and_unique() {
+        let entries = [
+            AssetEntry {
+                path: "sprites/hero.png".to_owned(),
+                kind: AssetKind::Image,
+            },
+            AssetEntry {
+                path: "audio/jump.wav".to_owned(),
+                kind: AssetKind::Audio,
+            },
+            AssetEntry {
+                path: "sprites/frog.png".to_owned(),
+                kind: AssetKind::Image,
+            },
+            AssetEntry {
+                path: "root.png".to_owned(),
+                kind: AssetKind::Image,
+            },
+        ];
+        assert_eq!(AssetFilter::folders(&entries), ["audio", "sprites"]);
+        assert_eq!(entries[3].folder(), "");
+    }
+
+    #[test]
+    fn filters_combine_folder_query_and_kind() {
+        let hero = AssetEntry {
+            path: "sprites/hero.png".to_owned(),
+            kind: AssetKind::Image,
+        };
+        let frog = AssetEntry {
+            path: "sprites/frog.png".to_owned(),
+            kind: AssetKind::Image,
+        };
+        let jump = AssetEntry {
+            path: "audio/jump.wav".to_owned(),
+            kind: AssetKind::Audio,
+        };
+        let filter = AssetFilter {
+            folder: "sprites".to_owned(),
+            query: "HERO".to_owned(),
+            kind: Some(AssetKind::Image),
+        };
+        assert!(filter.matches(&hero));
+        assert!(!filter.matches(&frog));
+        assert!(!filter.matches(&jump));
+        let broad = AssetFilter::default();
+        assert!(broad.matches(&hero) && broad.matches(&frog) && broad.matches(&jump));
+        let audio = AssetFilter {
+            kind: Some(AssetKind::Audio),
+            ..Default::default()
+        };
+        assert!(audio.matches(&jump));
+        assert!(!audio.matches(&hero));
+    }
+
+    #[test]
+    fn asset_panel_draws_search_filters_and_selection() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.assets.entries.clear();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(900.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Assets").show(ctx, |ui| assets_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Assets").show(ctx, |ui| assets_ui(&mut app, ui));
+        });
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        output.textures_delta.clear();
+        assert!(
+            texts.iter().any(|text| text.contains("Assets")),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|text| text.contains("Buscar")));
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("Sin asset seleccionado"))
+        );
     }
 }
