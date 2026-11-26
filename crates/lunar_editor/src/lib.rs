@@ -56,6 +56,12 @@ pub enum EditorCommand {
     SetTransform { id: u64, transform: Transform },
     /// Añade un componente serializable al final de la entidad.
     AddComponent { id: u64, component: Component },
+    /// Sustituye un componente por índice (ADR-030).
+    SetComponent {
+        id: u64,
+        index: usize,
+        component: Component,
+    },
     /// Elimina un componente por índice.
     RemoveComponent { id: u64, index: usize },
     /// Reordena una entidad dentro del vector de la escena (ADR-020).
@@ -259,6 +265,20 @@ fn mutate(
         }
         EditorCommand::AddComponent { id, component } => {
             entity_mut(scene, *id)?.components.push(component.clone());
+        }
+        EditorCommand::SetComponent {
+            id,
+            index,
+            component,
+        } => {
+            let entity = entity_mut(scene, *id)?;
+            let Some(slot) = entity.components.get_mut(*index) else {
+                return Err(EditorError::ComponentIndex {
+                    id: *id,
+                    index: *index,
+                });
+            };
+            *slot = component.clone();
         }
         EditorCommand::RemoveComponent { id, index } => {
             let entity = entity_mut(scene, *id)?;
@@ -504,6 +524,80 @@ mod tests {
                 .is_ok()
         );
         assert!(document.scene().entities[0].components.is_empty());
+    }
+
+    #[test]
+    fn set_component_validates_and_undoes() {
+        use lunar_scenes::{AnimationClip, SpriteMeta};
+
+        let mut document = EditorDocument::new();
+        document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create entity");
+        let sprite = Component::Sprite {
+            asset: "sheet.png".to_owned(),
+            meta: SpriteMeta::single_cell(),
+            animations: Vec::new(),
+        };
+        document
+            .apply(EditorCommand::AddComponent {
+                id: 1,
+                component: sprite.clone(),
+            })
+            .expect("add sprite");
+
+        let edited = Component::Sprite {
+            asset: "sheet.png".to_owned(),
+            meta: SpriteMeta {
+                columns: 4,
+                rows: 2,
+                fps: 8.0,
+                ..SpriteMeta::single_cell()
+            },
+            animations: vec![AnimationClip {
+                name: "idle".to_owned(),
+                frames: vec![0, 1, 2, 3],
+                fps: 8.0,
+                looping: true,
+            }],
+        };
+        document
+            .apply(EditorCommand::SetComponent {
+                id: 1,
+                index: 0,
+                component: edited.clone(),
+            })
+            .expect("edit sprite");
+        assert_eq!(document.scene().entities[0].components, vec![edited]);
+
+        let invalid = Component::Sprite {
+            asset: "sheet.png".to_owned(),
+            meta: SpriteMeta {
+                columns: 0,
+                ..SpriteMeta::single_cell()
+            },
+            animations: Vec::new(),
+        };
+        assert!(
+            document
+                .apply(EditorCommand::SetComponent {
+                    id: 1,
+                    index: 0,
+                    component: invalid,
+                })
+                .is_err()
+        );
+        assert_eq!(
+            document.apply(EditorCommand::SetComponent {
+                id: 1,
+                index: 3,
+                component: sprite.clone(),
+            }),
+            Err(EditorError::ComponentIndex { id: 1, index: 3 })
+        );
+
+        assert!(document.undo());
+        assert_eq!(document.scene().entities[0].components, vec![sprite]);
     }
 
     #[test]
