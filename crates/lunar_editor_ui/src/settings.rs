@@ -156,8 +156,20 @@ mod tests {
     }
 
     #[test]
-    fn unknown_keys_and_newlines_in_paths_are_ignored() {
-        let text = "version=9\nassets_root=assets/ruta\ncon\nsalto\n";
+    fn unknown_keys_are_ignored() {
+        let text = "version=9\nassets_root=assets/ruta\n";
         assert_eq!(decode(text).assets_root, "assets/ruta");
+    }
+
+    #[test]
+    fn encode_removes_newlines_from_paths() {
+        let settings = EditorSettings {
+            assets_root: "assets/ruta\ncon\nsalto".to_owned(),
+            ..EditorSettings::default()
+        };
+        assert_eq!(
+            decode(&encode(&settings)).assets_root,
+            "assets/rutaconsalto"
+        );
     }
 }
