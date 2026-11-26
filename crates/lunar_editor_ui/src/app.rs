@@ -79,7 +79,7 @@ pub(crate) struct EditorApp {
     pub(crate) play_time: f32,
     pub(crate) play_velocities: HashMap<u64, f32>,
     play_floor: f32,
-    play_snapshot: Option<(Scene, Vec<u64>)>,
+    play_snapshot: Option<Scene>,
     pub(crate) pending_action: Option<PendingAction>,
     pub(crate) save_as_open: bool,
     pub(crate) save_as_buffer: String,
@@ -169,9 +169,20 @@ impl EditorApp {
         self.status = message;
     }
 
-    pub(crate) fn apply(&mut self, command: EditorCommand) {
-        if self.play_state != PlayState::Stopped {
+    /// Única comprobación de que la escena se puede tocar. La usan tanto los
+    /// atajos como los botones de la barra, para que ninguna acción escape al
+    /// bloqueo durante Play (E6).
+    fn ensure_editable(&mut self) -> bool {
+        if self.play_state == PlayState::Stopped {
+            true
+        } else {
             self.set_status("Detén la simulación antes de editar");
+            false
+        }
+    }
+
+    pub(crate) fn apply(&mut self, command: EditorCommand) {
+        if !self.ensure_editable() {
             return;
         }
         match self.document.apply(command) {
@@ -197,6 +208,9 @@ impl EditorApp {
     }
 
     pub(crate) fn undo(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
         if self.document.undo() {
             self.revision += 1;
             self.set_status("");
@@ -206,6 +220,9 @@ impl EditorApp {
     }
 
     pub(crate) fn redo(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
         if self.document.redo() {
             self.revision += 1;
             self.set_status("");
@@ -215,6 +232,9 @@ impl EditorApp {
     }
 
     pub(crate) fn request_new(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
         if self.document.is_dirty() {
             self.pending_action = Some(PendingAction::New);
             self.set_status("Confirma cómo guardar antes de crear una escena nueva");
@@ -224,6 +244,9 @@ impl EditorApp {
     }
 
     pub(crate) fn request_open(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
         let path = PathBuf::from(&self.path_text);
         if self.document.is_dirty() {
             self.pending_action = Some(PendingAction::Open(path));
@@ -234,6 +257,9 @@ impl EditorApp {
     }
 
     pub(crate) fn open_path(&mut self, path: PathBuf) {
+        if !self.ensure_editable() {
+            return;
+        }
         match EditorDocument::load_from_path(&path) {
             Ok(document) => {
                 self.document = document;
@@ -255,6 +281,9 @@ impl EditorApp {
     }
 
     pub(crate) fn begin_save_as(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
         self.save_as_buffer = self.path_text.clone();
         self.save_as_open = true;
     }
@@ -288,6 +317,9 @@ impl EditorApp {
     }
 
     fn save_to(&mut self, path: PathBuf) -> bool {
+        if !self.ensure_editable() {
+            return false;
+        }
         match self.document.save_to_path(&path) {
             Ok(()) => {
                 self.path = path.clone();
@@ -343,6 +375,9 @@ impl EditorApp {
     }
 
     pub(crate) fn delete_selected(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
         let ids = self.document.selection().to_vec();
         for id in ids {
             self.apply(EditorCommand::DeleteEntity { id });
@@ -350,6 +385,9 @@ impl EditorApp {
     }
 
     pub(crate) fn duplicate_selected(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
         let Some(id) = self.document.selection().first().copied() else {
             self.set_status("Selecciona una entidad para duplicar");
             return;
@@ -373,6 +411,9 @@ impl EditorApp {
     }
 
     pub(crate) fn create_entity_from_asset(&mut self, asset: &str, position: [f32; 2]) {
+        if !self.ensure_editable() {
+            return;
+        }
         let Some(kind) = self.assets.kind(asset) else {
             self.set_status(format!("Asset no cargado: {asset}"));
             return;
@@ -408,6 +449,9 @@ impl EditorApp {
     /// Crea una entidad desde una plantilla, usando el primer asset del panel
     /// cuando la plantilla lo necesita. Todo pasa por `EditorDocument::apply`.
     pub(crate) fn create_from_template(&mut self, template: EntityTemplate) {
+        if !self.ensure_editable() {
+            return;
+        }
         let component = match template.asset_kind() {
             Some(kind) => {
                 let asset = self
@@ -460,9 +504,7 @@ impl EditorApp {
         if self.play_state != PlayState::Stopped {
             return;
         }
-        let snapshot = self.document.scene().clone();
-        let selection = self.document.selection().to_vec();
-        self.play_snapshot = Some((snapshot, selection));
+        self.play_snapshot = Some(self.document.scene().clone());
         self.play_velocities = dynamic_ids(self.document.scene())
             .into_iter()
             .map(|id| (id, 0.0))
@@ -498,12 +540,14 @@ impl EditorApp {
         if self.play_state == PlayState::Stopped {
             return;
         }
-        if let Some((scene, selection)) = self.play_snapshot.take() {
-            match EditorDocument::from_scene(scene) {
-                Ok(document) => {
-                    self.document = document;
-                    self.document.select(&selection);
-                }
+        if let Some(snapshot) = self.play_snapshot.take()
+            && self.document.scene() != &snapshot
+        {
+            // La simulación solo escribe en `preview`, así que esto no debería
+            // ocurrir. Se restaura solo en ese caso para no perder el historial
+            // de undo/redo en el camino normal (E6).
+            match EditorDocument::from_scene(snapshot) {
+                Ok(document) => self.document = document,
                 Err(error) => self.set_status(format!("No se pudo restaurar: {error}")),
             }
         }
@@ -512,7 +556,7 @@ impl EditorApp {
         self.play_velocities.clear();
         self.preview.clear();
         self.drag = CanvasDrag::None;
-        self.set_status("Play detenido; escena restaurada");
+        self.set_status("Play detenido; vista previa descartada");
     }
 
     /// Avanza la simulación. Los cambios viven en `preview`, nunca en la escena.
@@ -845,6 +889,106 @@ mod tests {
         let mut app = fresh_app();
         app.play();
         app.apply(EditorCommand::CreateEntity { id: 99, name: None });
+        assert!(app.document.scene().entities.is_empty());
+        assert!(app.status.contains("Detén"));
+        app.stop_play();
+    }
+
+    #[test]
+    fn full_flow_create_select_edit_save_play_and_undo() {
+        let ctx = Context::default();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("lunar-e6-flow-{unique}.scene.json"));
+        let mut app = EditorApp::new(Some(path.clone()), &ctx);
+
+        // Crear desde plantilla: la entidad queda seleccionada.
+        app.create_from_template(EntityTemplate::Empty);
+        let id = app.document.scene().entities[0].id;
+        assert_eq!(app.document.selection(), &[id]);
+
+        // Editar por los mismos comandos que usan inspector y gizmos.
+        app.apply(EditorCommand::RenameEntity {
+            id,
+            name: Some("Nave".to_owned()),
+        });
+        app.apply(EditorCommand::SetTransform {
+            id,
+            transform: Transform {
+                translation: [2.0, 4.0, 0.0],
+                ..Transform::default()
+            },
+        });
+        app.apply(EditorCommand::AddComponent {
+            id,
+            component: Component::Collider2D {
+                shape: Shape2D::Ball { radius: 0.5 },
+                body: BodyType::Dynamic,
+            },
+        });
+        assert!(app.document.is_dirty());
+        let history = app.document.undo_len();
+        assert_eq!(history, 4);
+
+        // Guardar y volver a leer desde disco.
+        assert!(app.save());
+        assert!(!app.document.is_dirty());
+        assert!(path.exists());
+        let saved = EditorDocument::load_from_path(&path).unwrap();
+        assert_eq!(saved.scene().entities[0].name.as_deref(), Some("Nave"));
+        assert_eq!(
+            saved.scene().entities[0].transform.translation,
+            [2.0, 4.0, 0.0]
+        );
+
+        // Play: la escena no se toca, guardar queda bloqueado, el historial
+        // sobrevive al ciclo y la vista previa se descarta al detener.
+        app.play();
+        app.tick_play(0.1);
+        assert!(app.preview[&id].translation[1] < 4.0);
+        assert_eq!(
+            app.document.scene().entities[0].transform.translation[1],
+            4.0
+        );
+        assert!(!app.save());
+        assert!(app.status.contains("Detén"));
+        app.stop_play();
+        assert!(app.preview.is_empty());
+        assert_eq!(app.document.undo_len(), history);
+
+        // Deshacer y rehacer siguen actuando sobre la escena real.
+        app.undo();
+        assert!(app.document.scene().entities[0].components.is_empty());
+        app.redo();
+        assert_eq!(app.document.scene().entities[0].components.len(), 1);
+        assert_eq!(app.document.undo_len(), history);
+
+        let messages: Vec<&str> = app
+            .status_log
+            .iter()
+            .map(|entry| entry.message.as_str())
+            .collect();
+        assert!(messages.iter().any(|message| message.contains("Creada")));
+        assert!(messages.iter().any(|message| message.contains("Guardada")));
+        assert!(messages.iter().any(|message| message.contains("Play:")));
+        assert!(messages.iter().any(|message| message.contains("detenido")));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn toolbar_actions_stay_locked_during_play() {
+        let mut app = fresh_app();
+        app.play();
+        app.request_new();
+        app.request_open();
+        app.begin_save_as();
+        app.duplicate_selected();
+        app.delete_selected();
+        assert!(app.pending_action.is_none());
+        assert!(!app.save_as_open);
         assert!(app.document.scene().entities.is_empty());
         assert!(app.status.contains("Detén"));
         app.stop_play();
