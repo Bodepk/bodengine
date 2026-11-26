@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use egui::{Context, Ui};
 use lunar_editor::{EditorCommand, EditorDocument, EditorError};
@@ -58,7 +59,9 @@ pub(crate) struct EditorApp {
     status: String,
     pub(crate) status_log: Vec<LogEntry>,
     pub(crate) console_filter: ConsoleFilter,
+    pub(crate) console_search: String,
     pub(crate) show_log: bool,
+    start_time: Instant,
     pub(crate) assets: AssetLibrary,
     pub(crate) assets_root_text: String,
     pub(crate) asset_search: String,
@@ -100,8 +103,9 @@ impl EditorApp {
             }
         };
         let path_text = path.to_string_lossy().into_owned();
+        let start_time = Instant::now();
         let mut status_log = Vec::new();
-        crate::status::push(&mut status_log, status.clone());
+        crate::status::push(&mut status_log, status.clone(), 0.0);
         let settings = crate::settings::load();
         let assets_root_text = settings.assets_root.clone();
         let mut assets = AssetLibrary::new(PathBuf::from(&assets_root_text));
@@ -127,7 +131,9 @@ impl EditorApp {
             status,
             status_log,
             console_filter: ConsoleFilter::default(),
+            console_search: String::new(),
             show_log: false,
+            start_time,
             assets,
             assets_root_text,
             asset_search: String::new(),
@@ -158,7 +164,8 @@ impl EditorApp {
     /// Los mensajes vacíos limpian la barra sin añadir una entrada.
     pub(crate) fn set_status(&mut self, message: impl Into<String>) {
         let message = message.into();
-        crate::status::push(&mut self.status_log, message.clone());
+        let elapsed = self.start_time.elapsed().as_secs_f32();
+        crate::status::push(&mut self.status_log, message.clone(), elapsed);
         self.status = message;
     }
 

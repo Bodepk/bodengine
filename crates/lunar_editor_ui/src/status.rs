@@ -20,10 +20,14 @@ pub(crate) enum Level {
 }
 
 /// Entrada del historial; el mensaje es el mismo que se muestra en la barra.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LogEntry {
     pub(crate) level: Level,
     pub(crate) message: String,
+    /// Segundos transcurridos desde el arranque del editor.
+    pub(crate) elapsed: f32,
+    /// Veces que se repitió el mensaje de forma consecutiva.
+    pub(crate) count: usize,
 }
 
 /// Filtro de severidades activo en la consola.
@@ -40,6 +44,17 @@ impl Default for ConsoleFilter {
             info: true,
             warn: true,
             error: true,
+        }
+    }
+}
+
+impl Level {
+    #[must_use]
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Info => "Info",
+            Self::Warn => "Aviso",
+            Self::Error => "Error",
         }
     }
 }
@@ -76,21 +91,72 @@ pub(crate) fn level_for(message: &str) -> Level {
     }
 }
 
-/// Añade un mensaje al historial, evitando repetir el último consecutivo y
-/// conservando como máximo `MAX_LOG` entradas.
-pub(crate) fn push(entries: &mut Vec<LogEntry>, message: impl Into<String>) {
+/// Añade un mensaje al historial. Los mensajes consecutivos iguales se
+/// agrupan en la última entrada (contador `×N`) en vez de descartarse, y se
+/// conservan como máximo `MAX_LOG` entradas.
+pub(crate) fn push(entries: &mut Vec<LogEntry>, message: impl Into<String>, elapsed: f32) {
     let message = message.into();
-    if message.is_empty() || entries.last().is_some_and(|last| last.message == message) {
+    if message.is_empty() {
+        return;
+    }
+    if let Some(last) = entries.last_mut()
+        && last.message == message
+    {
+        last.count += 1;
         return;
     }
     entries.push(LogEntry {
         level: level_for(&message),
         message,
+        elapsed,
+        count: 1,
     });
     if entries.len() > MAX_LOG {
         let excess = entries.len() - MAX_LOG;
         entries.drain(..excess);
     }
+}
+
+/// Entradas visibles, de la más reciente a la más antigua, tras aplicar el
+/// filtro de severidad y la búsqueda por substring insensible a mayúsculas.
+#[must_use]
+pub(crate) fn visible_entries(
+    entries: &[LogEntry],
+    filter: ConsoleFilter,
+    search: &str,
+) -> Vec<LogEntry> {
+    let query = search.to_ascii_lowercase();
+    entries
+        .iter()
+        .rev()
+        .filter(|entry| {
+            filter.matches(entry.level)
+                && (query.is_empty() || entry.message.to_ascii_lowercase().contains(&query))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Texto plano de una selección de entradas, para copiar al portapapeles.
+#[must_use]
+pub(crate) fn format_entries(entries: &[LogEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| {
+            let repeat = if entry.count > 1 {
+                format!(" (×{})", entry.count)
+            } else {
+                String::new()
+            };
+            format!(
+                "[+{:.2}s] {} {}{repeat}",
+                entry.elapsed,
+                entry.level.label(),
+                entry.message
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Acción elegida en la fila de confirmación de la consola.
@@ -126,6 +192,7 @@ pub(crate) fn console_ui(app: &mut EditorApp, ui: &mut Ui) {
         count_for(&app.status_log, Level::Error),
     ];
     let mut clear = false;
+    let mut copy = false;
     let mut show_log = app.show_log;
     ui.horizontal(|ui| {
         ui.heading("Consola");
@@ -145,29 +212,50 @@ pub(crate) fn console_ui(app: &mut EditorApp, ui: &mut Ui) {
             if ui.button("Historial").clicked() {
                 show_log = !show_log;
             }
+            if ui.button("Copiar").clicked() {
+                copy = true;
+            }
             if ui.button("Limpiar").clicked() {
                 clear = true;
             }
         });
     });
+    ui.add(
+        egui::TextEdit::singleline(&mut app.console_search)
+            .hint_text("Buscar en consola…")
+            .desired_width(220.0),
+    );
+    let visible = visible_entries(&app.status_log, filter, &app.console_search);
+    ui.label(format!(
+        "{} de {} mensaje(s)",
+        visible.len(),
+        app.status_log.len()
+    ));
     ui.separator();
     egui::ScrollArea::vertical().show(ui, |ui| {
-        for entry in app.status_log.iter().rev() {
-            if !filter.matches(entry.level) {
-                continue;
-            }
+        for entry in &visible {
             let color = match entry.level {
                 Level::Info => Color32::from_gray(210),
                 Level::Warn => Color32::YELLOW,
                 Level::Error => Color32::RED,
             };
-            ui.colored_label(color, entry.message.clone());
+            ui.horizontal(|ui| {
+                ui.monospace(format!("[+{:.2}s]", entry.elapsed));
+                ui.colored_label(color, entry.message.clone());
+                if entry.count > 1 {
+                    ui.colored_label(Color32::GRAY, format!("×{}", entry.count));
+                }
+            });
         }
     });
 
     app.show_log = show_log;
     if clear {
         app.status_log.clear();
+        app.console_search.clear();
+    }
+    if copy {
+        ui.ctx().copy_text(format_entries(&visible));
     }
     match choice {
         Some(Choice::Save) => app.save_and_continue(),
@@ -193,7 +281,19 @@ pub(crate) fn log_window(app: &mut EditorApp, ctx: &Context) {
                 ui.label("Sin mensajes todavía");
             } else {
                 for entry in status_log.iter().rev() {
-                    ui.monospace(entry.message.as_str());
+                    ui.horizontal(|ui| {
+                        ui.monospace(format!("[+{:.2}s]", entry.elapsed));
+                        ui.monospace(format!(
+                            "{} {}{}",
+                            entry.level.label(),
+                            entry.message,
+                            if entry.count > 1 {
+                                format!(" (×{})", entry.count)
+                            } else {
+                                String::new()
+                            }
+                        ));
+                    });
                 }
             }
             ui.separator();
@@ -252,34 +352,45 @@ mod tests {
         );
         assert!(texts.iter().any(|text| text.contains("Info (")));
         assert!(texts.iter().any(|text| text.contains("Guardada escena")));
+        assert!(texts.iter().any(|text| text.contains("Buscar en consola")));
+        assert!(texts.iter().any(|text| text.contains("Copiar")));
+        assert!(texts.iter().any(|text| text.contains("mensaje(s)")));
     }
 
     #[test]
     fn pushes_messages_in_order() {
         let mut log = Vec::new();
-        push(&mut log, "primero");
-        push(&mut log, "segundo");
+        push(&mut log, "primero", 1.0);
+        push(&mut log, "segundo", 2.0);
         assert_eq!(
             log.iter()
                 .map(|entry| entry.message.as_str())
                 .collect::<Vec<_>>(),
             vec!["primero", "segundo"]
         );
+        assert_eq!(log[0].elapsed, 1.0);
+        assert_eq!(log[1].elapsed, 2.0);
     }
 
     #[test]
-    fn skips_consecutive_duplicates() {
+    fn groups_only_consecutive_repeats() {
         let mut log = Vec::new();
-        push(&mut log, "guardada");
-        push(&mut log, "guardada");
-        push(&mut log, "abierta");
-        push(&mut log, "guardada");
+        push(&mut log, "guardada", 1.0);
+        push(&mut log, "guardada", 1.1);
+        push(&mut log, "guardada", 1.2);
+        push(&mut log, "abierta", 2.0);
+        push(&mut log, "guardada", 3.0);
         assert_eq!(
             log.iter()
                 .map(|entry| entry.message.as_str())
                 .collect::<Vec<_>>(),
             vec!["guardada", "abierta", "guardada"]
         );
+        assert_eq!(
+            log.iter().map(|entry| entry.count).collect::<Vec<_>>(),
+            vec![3, 1, 1]
+        );
+        assert_eq!(log[0].elapsed, 1.0);
     }
 
     #[test]
@@ -287,8 +398,10 @@ mod tests {
         let mut log = vec![LogEntry {
             level: Level::Info,
             message: "primero".to_owned(),
+            elapsed: 0.0,
+            count: 1,
         }];
-        push(&mut log, "");
+        push(&mut log, "", 0.1);
         assert_eq!(log.len(), 1);
     }
 
@@ -296,7 +409,7 @@ mod tests {
     fn caps_the_history() {
         let mut log = Vec::new();
         for i in 0..MAX_LOG + 5 {
-            push(&mut log, format!("mensaje {i}"));
+            push(&mut log, format!("mensaje {i}"), i as f32);
         }
         assert_eq!(log.len(), MAX_LOG);
         assert_eq!(
@@ -333,10 +446,40 @@ mod tests {
     #[test]
     fn counts_entries_by_level() {
         let mut log = Vec::new();
-        push(&mut log, "Guardada escena");
-        push(&mut log, "No se pudo abrir escena");
+        push(&mut log, "Guardada escena", 0.0);
+        push(&mut log, "No se pudo abrir escena", 0.0);
         assert_eq!(count_for(&log, Level::Info), 1);
         assert_eq!(count_for(&log, Level::Error), 1);
         assert_eq!(count_for(&log, Level::Warn), 0);
+    }
+
+    #[test]
+    fn search_combines_with_the_severity_filter() {
+        let mut log = Vec::new();
+        push(&mut log, "Guardada escena.json", 1.0);
+        push(&mut log, "Abierta escena.json", 2.0);
+        push(&mut log, "No se pudo guardar otro.json", 3.0);
+        let filter = ConsoleFilter {
+            error: false,
+            ..Default::default()
+        };
+        let found = visible_entries(&log, filter, "ESCENA");
+        assert_eq!(
+            found.iter().map(|e| e.message.as_str()).collect::<Vec<_>>(),
+            vec!["Abierta escena.json", "Guardada escena.json"]
+        );
+        let all = visible_entries(&log, ConsoleFilter::default(), "");
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].message, "No se pudo guardar otro.json");
+    }
+
+    #[test]
+    fn copied_text_keeps_time_level_and_repeat_count() {
+        let mut log = Vec::new();
+        push(&mut log, "Guardada escena", 1.5);
+        push(&mut log, "Guardada escena", 1.6);
+        let text = format_entries(&visible_entries(&log, ConsoleFilter::default(), ""));
+        assert_eq!(text, "[+1.50s] Info Guardada escena (×2)");
+        assert!(format_entries(&[]).is_empty());
     }
 }
