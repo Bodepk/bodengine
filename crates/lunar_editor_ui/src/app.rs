@@ -50,7 +50,9 @@ pub(crate) struct EditorApp {
     synced_selection: Vec<u64>,
     synced_revision: u64,
     revision: u64,
-    pub(crate) status: String,
+    status: String,
+    pub(crate) status_log: Vec<String>,
+    pub(crate) show_log: bool,
     pub(crate) assets: AssetLibrary,
     pub(crate) assets_root_text: String,
     pub(crate) view_center: [f32; 2],
@@ -103,7 +105,9 @@ impl EditorApp {
             synced_selection: Vec::new(),
             synced_revision: 0,
             revision: 0,
-            status,
+            status: status.clone(),
+            status_log: vec![status],
+            show_log: false,
             assets,
             assets_root_text,
             view_center: settings.center,
@@ -119,13 +123,21 @@ impl EditorApp {
         }
     }
 
+    /// Actualiza la barra de estado y registra el mensaje en el historial.
+    /// Los mensajes vacíos limpian la barra sin añadir una entrada.
+    pub(crate) fn set_status(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        crate::status::push(&mut self.status_log, message.clone());
+        self.status = message;
+    }
+
     pub(crate) fn apply(&mut self, command: EditorCommand) {
         match self.document.apply(command) {
             Ok(()) => {
                 self.revision += 1;
-                self.status.clear();
+                self.set_status("");
             }
-            Err(error) => self.status = error.to_string(),
+            Err(error) => self.set_status(error.to_string()),
         }
     }
 
@@ -145,25 +157,25 @@ impl EditorApp {
     pub(crate) fn undo(&mut self) {
         if self.document.undo() {
             self.revision += 1;
-            self.status.clear();
+            self.set_status("");
         } else {
-            self.status = String::from("Nada para deshacer");
+            self.set_status("Nada para deshacer");
         }
     }
 
     pub(crate) fn redo(&mut self) {
         if self.document.redo() {
             self.revision += 1;
-            self.status.clear();
+            self.set_status("");
         } else {
-            self.status = String::from("Nada para rehacer");
+            self.set_status("Nada para rehacer");
         }
     }
 
     pub(crate) fn request_new(&mut self) {
         if self.document.is_dirty() {
             self.pending_action = Some(PendingAction::New);
-            self.status = String::from("Confirma cómo guardar antes de crear una escena nueva");
+            self.set_status("Confirma cómo guardar antes de crear una escena nueva");
         } else {
             self.new_document();
         }
@@ -173,7 +185,7 @@ impl EditorApp {
         let path = PathBuf::from(&self.path_text);
         if self.document.is_dirty() {
             self.pending_action = Some(PendingAction::Open(path));
-            self.status = String::from("Confirma cómo guardar antes de abrir otra escena");
+            self.set_status("Confirma cómo guardar antes de abrir otra escena");
         } else {
             self.open_path(path);
         }
@@ -188,10 +200,10 @@ impl EditorApp {
                 self.preview.clear();
                 self.drag = CanvasDrag::None;
                 self.revision += 1;
-                self.status = format!("Abierta {path:?}");
+                self.set_status(format!("Abierta {path:?}"));
                 self.remember(path);
             }
-            Err(error) => self.status = format!("No se pudo abrir {path:?}: {error}"),
+            Err(error) => self.set_status(format!("No se pudo abrir {path:?}: {error}")),
         }
     }
 
@@ -222,12 +234,12 @@ impl EditorApp {
         match self.document.save_to_path(&path) {
             Ok(()) => {
                 self.path = path.clone();
-                self.status = format!("Guardada {path:?}");
+                self.set_status(format!("Guardada {path:?}"));
                 self.remember(path);
                 true
             }
             Err(error) => {
-                self.status = format!("No se pudo guardar {path:?}: {error}");
+                self.set_status(format!("No se pudo guardar {path:?}: {error}"));
                 false
             }
         }
@@ -245,7 +257,7 @@ impl EditorApp {
 
     pub(crate) fn cancel_pending(&mut self) {
         self.pending_action = None;
-        self.status = String::from("Acción cancelada");
+        self.set_status("Acción cancelada");
     }
 
     fn continue_pending(&mut self) {
@@ -270,7 +282,7 @@ impl EditorApp {
         self.path = PathBuf::from("scene.json");
         self.path_text = self.path.to_string_lossy().into_owned();
         self.revision += 1;
-        self.status = String::from("Escena nueva");
+        self.set_status("Escena nueva");
     }
 
     pub(crate) fn delete_selected(&mut self) {
@@ -282,7 +294,7 @@ impl EditorApp {
 
     pub(crate) fn duplicate_selected(&mut self) {
         let Some(id) = self.document.selection().first().copied() else {
-            self.status = String::from("Selecciona una entidad para duplicar");
+            self.set_status("Selecciona una entidad para duplicar");
             return;
         };
         let new_id = next_entity_id(self.document.scene());
@@ -293,21 +305,19 @@ impl EditorApp {
         self.assets = AssetLibrary::new(PathBuf::from(&self.assets_root_text));
         self.assets.reload(ctx);
         match &self.assets.error {
-            Some(error) => self.status = error.clone(),
-            None => {
-                self.status = format!(
-                    "{} asset(s) en {}",
-                    self.assets.entries.len(),
-                    self.assets.root.display()
-                )
-            }
+            Some(error) => self.set_status(error.clone()),
+            None => self.set_status(format!(
+                "{} asset(s) en {}",
+                self.assets.entries.len(),
+                self.assets.root.display()
+            )),
         }
         self.save_settings();
     }
 
     pub(crate) fn create_entity_from_asset(&mut self, asset: &str, position: [f32; 2]) {
         let Some(kind) = self.assets.kind(asset) else {
-            self.status = format!("Asset no cargado: {asset}");
+            self.set_status(format!("Asset no cargado: {asset}"));
             return;
         };
         let id = next_entity_id(self.document.scene());
@@ -335,7 +345,7 @@ impl EditorApp {
                 ..Transform::default()
             },
         });
-        self.status = format!("Creada entidad #{id} desde {asset}");
+        self.set_status(format!("Creada entidad #{id} desde {asset}"));
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
@@ -437,13 +447,21 @@ impl eframe::App for EditorApp {
             .default_size(330.0)
             .show(ui, |ui| inspector::inspector_ui(self, ui));
         egui::Panel::bottom("status").show(ui, |ui| {
-            if self.status.is_empty() {
-                ui.label("Listo");
-            } else {
-                ui.colored_label(egui::Color32::LIGHT_GREEN, self.status.clone());
-            }
+            ui.horizontal(|ui| {
+                if self.status.is_empty() {
+                    ui.label("Listo");
+                } else {
+                    ui.colored_label(egui::Color32::LIGHT_GREEN, self.status.clone());
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Historial").clicked() {
+                        self.show_log = !self.show_log;
+                    }
+                });
+            });
         });
         egui::CentralPanel::default().show(ui, |ui| canvas_ui(self, ui));
         crate::dialogs::show(self, &ctx);
+        crate::status::log_window(self, &ctx);
     }
 }

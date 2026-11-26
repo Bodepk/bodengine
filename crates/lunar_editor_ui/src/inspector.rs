@@ -172,7 +172,7 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
                     let component = prefab_component(&prefab.name);
                     app.apply(EditorCommand::AddComponent { id, component });
                 }
-                None => app.status = String::from("No hay prefabs en la escena"),
+                None => app.set_status("No hay prefabs en la escena"),
             }
         }
     });
