@@ -15,6 +15,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Preferencias persistentes del editor (ADR-031): raíz de assets, centro y zoom de la cámara, rejilla y snap en `LunarEditor/settings.txt`, con valores por defecto por campo si el fichero falta o es inválido.
 - Historial del estado del editor: un único método registra hasta 50 mensajes en memoria y el botón «Historial» de la barra de estado abre una ventana para consultarlos o limpiarlos.
 - Atajos `Ctrl+O` para abrir la ruta del campo de texto y `Ctrl+Shift+S` para «Guardar como»; este último ya no dispara además un guardado normal.
+- Explorador de escenas integrado en el botón «Buscar…» de la barra y de «Guardar como»: navegación por carpetas, lista de `.json`, selección y doble clic para aceptar, sin diálogo nativo ni dependencias nuevas.
 
 ### Cambiado
 
