@@ -11,6 +11,9 @@ use egui::{Align2, Context, Vec2};
 
 use crate::app::EditorApp;
 
+/// Directorio virtual que lista las unidades del equipo.
+pub(crate) const COMPUTER: &str = "<equipo>";
+
 /// Para qué se abre el explorador.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PickerMode {
@@ -69,13 +72,60 @@ impl FilePicker {
     }
 }
 
-/// Devuelve `.` cuando la ruta no tiene carpeta padre.
+/// Hace absoluta una ruta relativa usando el directorio de trabajo, sin
+/// canonicalizar: así no aparece el prefijo `\\?\` de Windows en la interfaz.
+#[must_use]
+pub(crate) fn absolute_dir(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
+}
+
+/// Devuelve la raíz del sistema de archivos cuando no hay padre, y `.` para
+/// rutas relativas sin carpeta.
 #[must_use]
 pub(crate) fn parent_dir(path: &Path) -> PathBuf {
-    path.parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf()
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        Some(_) => PathBuf::from("."),
+        None => path.to_path_buf(),
+    }
+}
+
+/// Comprueba si la ruta es una raíz, donde «Subir» debe llevar a «Equipo».
+#[must_use]
+pub(crate) fn is_root(path: &Path) -> bool {
+    path != Path::new(COMPUTER) && path.parent().is_none()
+}
+
+/// Unidades disponibles: letras `A:`–`Z:` en Windows y `/` en el resto.
+#[must_use]
+pub(crate) fn computer_entries() -> Vec<Entry> {
+    #[cfg(windows)]
+    {
+        let mut entries = Vec::new();
+        for letter in b'A'..=b'Z' {
+            let name = format!("{}:\\", letter as char);
+            if Path::new(&name).exists() {
+                entries.push(Entry {
+                    name,
+                    directory: true,
+                });
+            }
+        }
+        entries
+    }
+    #[cfg(not(windows))]
+    {
+        vec![Entry {
+            name: "/".to_owned(),
+            directory: true,
+        }]
+    }
 }
 
 /// Acepta `.json` sin distinguir mayúsculas.
@@ -109,6 +159,9 @@ pub(crate) fn sort_entries(entries: &mut [Entry]) {
 
 /// Lista carpetas y escenas JSON de `dir`, omitiendo entradas ocultas.
 pub(crate) fn read_directory(dir: &Path) -> std::io::Result<Vec<Entry>> {
+    if dir == Path::new(COMPUTER) {
+        return Ok(computer_entries());
+    }
     let mut entries = Vec::new();
     for item in std::fs::read_dir(dir)? {
         let item = item?;
@@ -148,21 +201,30 @@ pub(crate) fn show(app: &mut EditorApp, ctx: &Context) {
 
     let mut accept = false;
     let mut cancel = false;
+    let at_computer = picker.directory_text == COMPUTER;
     egui::Window::new("Examinar escenas")
         .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
         .collapsible(false)
         .resizable(true)
-        .default_size([480.0, 420.0])
+        .default_size([560.0, 440.0])
         .show(ctx, |ui| {
             ui.label("Carpeta:");
             ui.horizontal(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut picker.directory_text)
                         .hint_text("carpeta")
-                        .desired_width(320.0),
+                        .desired_width(250.0),
                 );
+                if ui.button("Equipo").clicked() {
+                    picker.directory_text = COMPUTER.to_owned();
+                }
                 if ui.button("Subir").clicked() {
-                    let parent = parent_dir(Path::new(&picker.directory_text));
+                    let current = Path::new(&picker.directory_text);
+                    let parent = if is_root(current) {
+                        PathBuf::from(COMPUTER)
+                    } else {
+                        parent_dir(current)
+                    };
                     picker.directory_text = parent.to_string_lossy().into_owned();
                 }
                 if ui.button("Actualizar").clicked() {
@@ -188,7 +250,11 @@ pub(crate) fn show(app: &mut EditorApp, ctx: &Context) {
                             let response = ui.selectable_label(selected, label);
                             if response.clicked() {
                                 if entry.directory {
-                                    let next = Path::new(&picker.directory_text).join(&entry.name);
+                                    let next = if picker.directory_text == COMPUTER {
+                                        PathBuf::from(&entry.name)
+                                    } else {
+                                        Path::new(&picker.directory_text).join(&entry.name)
+                                    };
                                     picker.directory_text = next.to_string_lossy().into_owned();
                                 } else {
                                     picker.name = entry.name.clone();
@@ -211,7 +277,9 @@ pub(crate) fn show(app: &mut EditorApp, ctx: &Context) {
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                accept |= ui.button("Aceptar").clicked();
+                accept |= ui
+                    .add_enabled(!at_computer, egui::Button::new("Aceptar"))
+                    .clicked();
                 cancel = ui.button("Cancelar").clicked();
             });
         });
@@ -265,6 +333,30 @@ mod tests {
             parent_dir(Path::new("assets/scene.json")),
             Path::new("assets")
         );
+    }
+
+    #[test]
+    fn absolute_dirs_can_walk_up_to_the_root() {
+        let cwd = std::env::current_dir().expect("directorio de trabajo");
+        let root = cwd.ancestors().last().expect("raíz del sistema");
+        assert!(is_root(root));
+        assert_eq!(parent_dir(root), root);
+        assert!(!is_root(&cwd));
+        assert!(parent_dir(&cwd).is_absolute());
+    }
+
+    #[test]
+    fn relative_paths_become_absolute() {
+        assert!(absolute_dir(Path::new("scene.json")).is_absolute());
+        let absolute = std::env::current_dir().expect("directorio de trabajo");
+        assert_eq!(absolute_dir(&absolute), absolute);
+    }
+
+    #[test]
+    fn computer_lists_at_least_one_drive() {
+        assert!(!computer_entries().is_empty());
+        let entries = read_directory(Path::new(COMPUTER)).expect("unidades");
+        assert_eq!(entries, computer_entries());
     }
 
     #[test]

@@ -7,7 +7,7 @@ use lunar_scenes::{Component, SceneError, Transform, normalize_asset_path};
 
 use crate::assets::{AssetKind, AssetLibrary, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
-use crate::file_picker::{FilePicker, PickerMode, parent_dir};
+use crate::file_picker::{FilePicker, PickerMode, absolute_dir, parent_dir};
 use crate::helpers::{audio_component, image_component, next_entity_id};
 use crate::recent;
 use crate::{hierarchy, inspector};
@@ -226,7 +226,7 @@ impl EditorApp {
             PickerMode::Open => self.path_text.clone(),
             PickerMode::Save => self.save_as_buffer.clone(),
         };
-        let path = PathBuf::from(&text);
+        let path = absolute_dir(&PathBuf::from(&text));
         let directory = parent_dir(&path);
         let name = path
             .file_name()
