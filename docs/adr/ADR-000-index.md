@@ -46,6 +46,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [027](ADR-027-scene-v2-sprites.md) | Escenas v2 con sprites, animación y prefabs | Aceptada |
 | [028](ADR-028-diagnostics-replay.md) | Diagnósticos, replay de input y hashes de estado | Aceptada |
 | [029](ADR-029-release-0-2-0.md) | Publicación de `v0.2.0` | Aceptada |
+| [030](ADR-030-inspector-componentes.md) | Inspector completo y edición de componentes | Aceptada |
 
 ## Consecuencias
 
