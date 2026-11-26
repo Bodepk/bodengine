@@ -12,6 +12,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - Inspector completo de componentes v2 (ADR-030): edición de `SpriteMeta`, clips de animación y sus fotogramas, `PrefabRef`, colisionadores 2D/3D y rutas de asset; botones para añadir `Sprite` y `Prefab`.
 - Comando `SetComponent { id, index, component }` en `lunar_editor`, validado y deshecho como los demás comandos.
 - Selección rectangular en el lienzo (Shift/Ctrl para extenderla), atajo `F` para encuadrar la selección o toda la escena y coordenadas del cursor en unidades de mundo.
+- Preferencias persistentes del editor (ADR-031): raíz de assets, centro y zoom de la cámara, rejilla y snap en `LunarEditor/settings.txt`, con valores por defecto por campo si el fichero falta o es inválido.
 
 ### Cambiado
 
