@@ -65,6 +65,23 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
             ui.colored_label(Color32::YELLOW, "● sin guardar");
         }
     });
+
+    // Confirmación visible también en la barra: el diálogo centrado puede
+    // quedar tapado o pasar desapercibido si se abre con el ratón.
+    if let Some(action) = app.pending_action.clone() {
+        ui.horizontal(|ui| {
+            ui.colored_label(Color32::YELLOW, format!("Confirmar: {}", action.label()));
+            if ui.button("Guardar y continuar").clicked() {
+                app.save_and_continue();
+            }
+            if ui.button("No guardar").clicked() {
+                app.discard_and_continue();
+            }
+            if ui.button("Cancelar").clicked() {
+                app.cancel_pending();
+            }
+        });
+    }
 }
 
 pub(crate) fn hierarchy_ui(app: &mut EditorApp, ui: &mut Ui) {
