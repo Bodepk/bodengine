@@ -7,9 +7,11 @@
 mod app;
 mod assets;
 mod canvas;
+mod dialogs;
 mod helpers;
 mod hierarchy;
 mod inspector;
+mod recent;
 
 use std::path::PathBuf;
 
@@ -18,10 +20,15 @@ pub use helpers::next_entity_id;
 /// Abre la ventana del editor. El primer argumento, si existe, es un JSON de escena.
 pub fn run() -> eframe::Result<()> {
     let scene_path = std::env::args().nth(1).map(PathBuf::from);
+    // Icono fijado en el repo: el mismo que eframe 0.37 usa por defecto, para
+    // que la ventana y la barra de tareas no dependan de esa versión.
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
+        .expect("el icono embebido del editor es válido");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Lunar Editor")
-            .with_inner_size([1180.0, 720.0]),
+            .with_inner_size([1180.0, 720.0])
+            .with_icon(icon),
         ..Default::default()
     };
 

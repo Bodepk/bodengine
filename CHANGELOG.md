@@ -2,6 +2,14 @@
 
 Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-index.md).
 
+## [Unreleased]
+
+### Añadido
+
+- El editor gráfico pide confirmación antes de descartar cambios sin guardar al crear una escena nueva o abrir otra, con opciones de guardar, no guardar o cancelar.
+- «Guardar como» en la barra de herramientas y desplegable de escenas recientes (hasta ocho rutas), persistido como texto plano en el directorio de configuración del usuario sin dependencias nuevas.
+- Icono de la ventana y de la barra de tareas fijado en el repositorio para `lunar_editor_ui`, en lugar de depender del valor por defecto de eframe.
+
 ## [0.2.0] — 2026-11-25
 
 Primera actualización de API desde `v0.1.0`: scripting C++ de primera clase, SDK instalable, servicios 3D y edición de escenas desde C++, escenas v2 y diagnósticos deterministas. La versión del workspace y la del SDK pasan a `0.2.0` (ADR-029).

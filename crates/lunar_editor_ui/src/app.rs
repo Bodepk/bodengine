@@ -8,7 +8,24 @@ use lunar_scenes::{Component, SceneError, Transform, normalize_asset_path};
 use crate::assets::{AssetKind, AssetLibrary, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
 use crate::helpers::{audio_component, image_component, next_entity_id};
+use crate::recent;
 use crate::{hierarchy, inspector};
+
+/// Acción que espera a resolver el aviso de cambios sin guardar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PendingAction {
+    New,
+    Open(PathBuf),
+}
+
+impl PendingAction {
+    pub(crate) fn label(&self) -> String {
+        match self {
+            Self::New => "crear escena nueva".to_owned(),
+            Self::Open(path) => format!("abrir {}", path.display()),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct EditorApp {
@@ -34,6 +51,10 @@ pub(crate) struct EditorApp {
     pub(crate) snap: bool,
     pub(crate) drag: CanvasDrag,
     pub(crate) preview: HashMap<u64, Transform>,
+    pub(crate) pending_action: Option<PendingAction>,
+    pub(crate) save_as_open: bool,
+    pub(crate) save_as_buffer: String,
+    pub(crate) recent: Vec<String>,
 }
 
 impl EditorApp {
@@ -62,7 +83,7 @@ impl EditorApp {
         Self {
             document,
             path,
-            path_text,
+            path_text: path_text.clone(),
             name_buffer: String::new(),
             asset_buffer: String::from("assets/sprite.png"),
             translation: [0.0; 3],
@@ -82,6 +103,10 @@ impl EditorApp {
             snap: false,
             drag: CanvasDrag::None,
             preview: HashMap::new(),
+            pending_action: None,
+            save_as_open: false,
+            save_as_buffer: path_text.clone(),
+            recent: recent::load(),
         }
     }
 
@@ -113,30 +138,107 @@ impl EditorApp {
         }
     }
 
-    pub(crate) fn open_path(&mut self) {
+    pub(crate) fn request_new(&mut self) {
+        if self.document.is_dirty() {
+            self.pending_action = Some(PendingAction::New);
+            self.status = String::from("Confirma cómo guardar antes de crear una escena nueva");
+        } else {
+            self.new_document();
+        }
+    }
+
+    pub(crate) fn request_open(&mut self) {
         let path = PathBuf::from(&self.path_text);
+        if self.document.is_dirty() {
+            self.pending_action = Some(PendingAction::Open(path));
+            self.status = String::from("Confirma cómo guardar antes de abrir otra escena");
+        } else {
+            self.open_path(path);
+        }
+    }
+
+    pub(crate) fn open_path(&mut self, path: PathBuf) {
         match EditorDocument::load_from_path(&path) {
             Ok(document) => {
                 self.document = document;
                 self.path = path.clone();
+                self.path_text = path.to_string_lossy().into_owned();
                 self.preview.clear();
                 self.drag = CanvasDrag::None;
                 self.revision += 1;
                 self.status = format!("Abierta {path:?}");
+                self.remember(path);
             }
             Err(error) => self.status = format!("No se pudo abrir {path:?}: {error}"),
         }
     }
 
-    pub(crate) fn save(&mut self) {
-        let path = PathBuf::from(&self.path_text);
+    pub(crate) fn open_recent(&mut self, path: String) {
+        self.path_text = path;
+        self.request_open();
+    }
+
+    pub(crate) fn begin_save_as(&mut self) {
+        self.save_as_buffer = self.path_text.clone();
+        self.save_as_open = true;
+    }
+
+    pub(crate) fn commit_save_as(&mut self, path_text: String) {
+        self.save_as_open = false;
+        if self.save_to(PathBuf::from(&path_text)) {
+            self.path_text = path_text;
+        }
+    }
+
+    /// Guarda en la ruta del documento, nunca en la del campo de texto, para
+    /// que «Guardar» no sobrescriba una escena distinta si se editó la ruta.
+    pub(crate) fn save(&mut self) -> bool {
+        self.save_to(self.path.clone())
+    }
+
+    fn save_to(&mut self, path: PathBuf) -> bool {
         match self.document.save_to_path(&path) {
             Ok(()) => {
                 self.path = path.clone();
                 self.status = format!("Guardada {path:?}");
+                self.remember(path);
+                true
             }
-            Err(error) => self.status = format!("No se pudo guardar {path:?}: {error}"),
+            Err(error) => {
+                self.status = format!("No se pudo guardar {path:?}: {error}");
+                false
+            }
         }
+    }
+
+    pub(crate) fn save_and_continue(&mut self) {
+        if self.save() {
+            self.continue_pending();
+        }
+    }
+
+    pub(crate) fn discard_and_continue(&mut self) {
+        self.continue_pending();
+    }
+
+    pub(crate) fn cancel_pending(&mut self) {
+        self.pending_action = None;
+        self.status = String::from("Acción cancelada");
+    }
+
+    fn continue_pending(&mut self) {
+        if let Some(action) = self.pending_action.take() {
+            match action {
+                PendingAction::New => self.new_document(),
+                PendingAction::Open(path) => self.open_path(path),
+            }
+        }
+    }
+
+    fn remember(&mut self, path: PathBuf) {
+        let text = path.to_string_lossy().into_owned();
+        self.recent = recent::remember(&self.recent, &text);
+        let _ = recent::save(&self.recent);
     }
 
     pub(crate) fn new_document(&mut self) {
@@ -304,5 +406,6 @@ impl eframe::App for EditorApp {
             }
         });
         egui::CentralPanel::default().show(ui, |ui| canvas_ui(self, ui));
+        crate::dialogs::show(self, &ctx);
     }
 }

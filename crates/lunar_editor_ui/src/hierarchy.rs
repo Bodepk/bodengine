@@ -10,7 +10,7 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
         ui.heading("Lunar Editor");
         ui.separator();
         if ui.button("Nuevo").clicked() {
-            app.new_document();
+            app.request_new();
         }
         ui.label("Ruta:");
         ui.add(
@@ -19,11 +19,27 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
                 .desired_width(260.0),
         );
         if ui.button("Abrir").clicked() {
-            app.open_path();
+            app.request_open();
         }
         if ui.button("Guardar").clicked() {
             app.save();
         }
+        if ui.button("Guardar como").clicked() {
+            app.begin_save_as();
+        }
+        let recent = app.recent.clone();
+        egui::ComboBox::from_label("Recientes")
+            .selected_text(if recent.is_empty() { "—" } else { "Abrir…" })
+            .show_ui(ui, |ui| {
+                if recent.is_empty() {
+                    ui.label("Sin escenas recientes");
+                }
+                for path in recent {
+                    if ui.selectable_label(false, path.clone()).clicked() {
+                        app.open_recent(path);
+                    }
+                }
+            });
         ui.separator();
         if ui
             .add_enabled(app.document.can_undo(), Button::new("Deshacer"))
