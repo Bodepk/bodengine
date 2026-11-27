@@ -123,18 +123,8 @@ fn entity_row(app: &mut EditorApp, ui: &mut Ui, id: u64, depth: usize) {
     let response = ui.selectable_label(selected, label);
 
     if response.clicked() {
-        let additive = ui.input(|input| input.modifiers.shift || input.modifiers.ctrl);
-        let mut selection = if additive {
-            app.document.selection().to_vec()
-        } else {
-            Vec::new()
-        };
-        if additive && selection.contains(&id) {
-            selection.retain(|selected| *selected != id);
-        } else if !selection.contains(&id) {
-            selection.push(id);
-        }
-        app.document.select(&selection);
+        let (ctrl, shift) = ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
+        app.select_clicked(id, ctrl, shift);
     }
     if response.drag_started() {
         DragAndDrop::set_payload(ui.ctx(), format!("{ENTITY_PAYLOAD_PREFIX}{id}"));

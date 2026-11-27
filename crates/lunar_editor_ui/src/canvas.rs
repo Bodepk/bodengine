@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use egui::{Color32, DragAndDrop, PointerButton, Pos2, Rect, Sense, Stroke, TextureId, Ui, Vec2};
+use lunar_editor::EditorCommand;
 use lunar_scenes::{Component, Transform};
 
 use crate::app::EditorApp;
@@ -323,6 +324,21 @@ fn paint_item(ui: &mut Ui, item: &DrawItem) {
     );
 }
 
+/// Centro común de la selección: centro del rectángulo que la envuelve.
+#[must_use]
+fn selection_center(items: &[DrawItem]) -> Option<Pos2> {
+    let mut selected = items
+        .iter()
+        .filter(|item| item.selected)
+        .map(|item| Rect::from_points(&sprite_corners(item)));
+    let first = selected.next()?;
+    Some(
+        selected
+            .fold(first, |acc, bounds| acc.union(bounds))
+            .center(),
+    )
+}
+
 /// Tirador de rotación: 22 px por encima del borde superior.
 #[must_use]
 fn rotate_handle(bounds: Rect) -> Pos2 {
@@ -333,6 +349,19 @@ fn rotate_handle(bounds: Rect) -> Pos2 {
 #[must_use]
 fn scale_handle(bounds: Rect) -> Pos2 {
     bounds.max + Vec2::new(6.0, 6.0)
+}
+
+fn paint_move_cross(ui: &mut Ui, center: Pos2) {
+    ui.painter().circle_filled(center, 5.0, Color32::LIGHT_BLUE);
+    let arm = 9.0;
+    ui.painter().line_segment(
+        [center - Vec2::new(arm, 0.0), center + Vec2::new(arm, 0.0)],
+        Stroke::new(1.5, Color32::LIGHT_BLUE),
+    );
+    ui.painter().line_segment(
+        [center - Vec2::new(0.0, arm), center + Vec2::new(0.0, arm)],
+        Stroke::new(1.5, Color32::LIGHT_BLUE),
+    );
 }
 
 fn paint_selection(ui: &mut Ui, items: &[DrawItem], mode: TransformMode) {
@@ -349,19 +378,7 @@ fn paint_selection(ui: &mut Ui, items: &[DrawItem], mode: TransformMode) {
             continue;
         }
         match mode {
-            TransformMode::Move => {
-                let center = bounds.center();
-                ui.painter().circle_filled(center, 5.0, Color32::LIGHT_BLUE);
-                let arm = 9.0;
-                ui.painter().line_segment(
-                    [center - Vec2::new(arm, 0.0), center + Vec2::new(arm, 0.0)],
-                    Stroke::new(1.5, Color32::LIGHT_BLUE),
-                );
-                ui.painter().line_segment(
-                    [center - Vec2::new(0.0, arm), center + Vec2::new(0.0, arm)],
-                    Stroke::new(1.5, Color32::LIGHT_BLUE),
-                );
-            }
+            TransformMode::Move => paint_move_cross(ui, bounds.center()),
             TransformMode::Rotate => {
                 ui.painter()
                     .circle_filled(rotate_handle(bounds), 5.0, Color32::YELLOW);
@@ -374,6 +391,14 @@ fn paint_selection(ui: &mut Ui, items: &[DrawItem], mode: TransformMode) {
                 );
             }
         }
+    }
+    // Con varias entidades seleccionadas hay un único tirador de movimiento,
+    // en el centro del grupo (E12). Escalar y rotar siguen siendo por entidad.
+    if selection_count > 1
+        && mode == TransformMode::Move
+        && let Some(center) = selection_center(items)
+    {
+        paint_move_cross(ui, center);
     }
 }
 
@@ -515,6 +540,19 @@ fn handle_pointer(
                 pointer,
                 center: app.view_center,
             };
+        } else if let Some(ids) = multi_move_at(items, pointer, app.transform_mode) {
+            let originals = ids
+                .into_iter()
+                .filter_map(|id| {
+                    app.document
+                        .scene()
+                        .entities
+                        .iter()
+                        .find(|entity| entity.id == id)
+                        .map(|entity| (id, entity.transform))
+                })
+                .collect();
+            app.drag = CanvasDrag::Move { pointer, originals };
         } else if let Some((id, kind)) = handle_at(items, pointer, app.transform_mode) {
             let transform = app
                 .document
@@ -542,17 +580,9 @@ fn handle_pointer(
                 };
             }
         } else if let Some(id) = entity_at(app, pointer, view, rect) {
-            let (ids, update_selection) = {
-                let selection = app.document.selection();
-                if selection.contains(&id) {
-                    (selection.to_vec(), false)
-                } else {
-                    (vec![id], true)
-                }
-            };
-            if update_selection {
-                app.document.select(&ids);
-            }
+            let (ctrl, shift) = ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
+            app.select_clicked(id, ctrl, shift);
+            let ids = app.document.selection().to_vec();
             let originals = ids
                 .into_iter()
                 .filter_map(|id| {
@@ -658,40 +688,33 @@ fn handle_pointer(
         let Some(pointer) = pointer else {
             return;
         };
-        let additive = ui.input(|input| input.modifiers.shift || input.modifiers.ctrl);
+        let (ctrl, shift) = ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
         if let Some(id) = entity_at(app, pointer, view, rect) {
-            let mut selection = if additive {
-                app.document.selection().to_vec()
-            } else {
-                Vec::new()
-            };
-            if additive && selection.contains(&id) {
-                selection.retain(|selected| *selected != id);
-            } else if !selection.contains(&id) {
-                selection.push(id);
-            }
-            app.document.select(&selection);
-        } else if !additive {
-            app.document.select(&[]);
+            app.select_clicked(id, ctrl, shift);
+        } else if !ctrl && !shift {
+            app.clear_selection();
         }
     }
 }
 
-/// Convierte las transformaciones temporales en comandos reales. Lo usan el
-/// lienzo 2D y la vista 3D para que un arrastre produzca un solo `SetTransform`.
+/// Convierte las transformaciones temporales en un único comando real. Lo usan
+/// el lienzo 2D y la vista 3D: arrastrar N entidades selectas deja **una** entrada
+/// en el historial y un solo `Ctrl+Z` las devuelve a su sitio (E12).
 pub(crate) fn commit_preview(app: &mut EditorApp) {
     let previews: Vec<(u64, Transform)> = app.preview.drain().collect();
-    for (id, transform) in previews {
-        let current = app
-            .document
-            .scene()
-            .entities
-            .iter()
-            .find(|entity| entity.id == id)
-            .map(|entity| entity.transform);
-        if current != Some(transform) {
-            app.apply(lunar_editor::EditorCommand::SetTransform { id, transform });
-        }
+    let transforms: Vec<(u64, Transform)> = previews
+        .into_iter()
+        .filter(|(id, transform)| {
+            app.document
+                .scene()
+                .entities
+                .iter()
+                .find(|entity| entity.id == *id)
+                .is_some_and(|entity| entity.transform != *transform)
+        })
+        .collect();
+    if !transforms.is_empty() {
+        app.apply(EditorCommand::SetTransforms { transforms });
     }
 }
 
@@ -731,6 +754,20 @@ fn commit_drag(app: &mut EditorApp, ui: &mut Ui, items: &[DrawItem]) {
 enum HandleKind {
     Scale,
     Rotate,
+}
+
+/// Tirador de movimiento de grupo: solo con dos o más entidades selectas.
+#[must_use]
+fn multi_move_at(items: &[DrawItem], pointer: Pos2, mode: TransformMode) -> Option<Vec<u64>> {
+    if mode != TransformMode::Move {
+        return None;
+    }
+    let selected: Vec<&DrawItem> = items.iter().filter(|item| item.selected).collect();
+    if selected.len() < 2 {
+        return None;
+    }
+    let center = selection_center(items)?;
+    ((pointer - center).length() <= 8.0).then(|| selected.iter().map(|item| item.id).collect())
 }
 
 fn handle_at(items: &[DrawItem], pointer: Pos2, mode: TransformMode) -> Option<(u64, HandleKind)> {
@@ -945,5 +982,145 @@ mod tests {
             Some((1, HandleKind::Rotate))
         );
         assert_eq!(handle_at(&items, scale, TransformMode::Rotate), None);
+    }
+
+    #[test]
+    fn committing_a_multi_entity_preview_is_one_undo_step() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        for id in 1..=3 {
+            app.document
+                .apply(EditorCommand::CreateEntity { id, name: None })
+                .expect("create entity");
+        }
+        let history = app.document.undo_len();
+        app.preview.insert(
+            1,
+            Transform {
+                translation: [1.0, 0.0, 0.0],
+                ..Transform::default()
+            },
+        );
+        app.preview.insert(
+            3,
+            Transform {
+                translation: [3.0, 0.0, 0.0],
+                ..Transform::default()
+            },
+        );
+
+        commit_preview(&mut app);
+
+        assert!(app.preview.is_empty());
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert_eq!(
+            app.document.scene().entities[0].transform.translation[0],
+            1.0
+        );
+        assert_eq!(
+            app.document.scene().entities[1].transform,
+            Transform::default()
+        );
+        assert_eq!(
+            app.document.scene().entities[2].transform.translation[0],
+            3.0
+        );
+
+        assert!(app.document.undo());
+        assert_eq!(
+            app.document.scene().entities[0].transform,
+            Transform::default()
+        );
+        assert_eq!(
+            app.document.scene().entities[2].transform,
+            Transform::default()
+        );
+        assert!(app.document.redo());
+        assert_eq!(
+            app.document.scene().entities[2].transform.translation[0],
+            3.0
+        );
+    }
+
+    #[test]
+    fn committing_an_unchanged_preview_keeps_history_intact() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create entity");
+        let history = app.document.undo_len();
+        app.preview.insert(1, Transform::default());
+
+        commit_preview(&mut app);
+
+        assert_eq!(app.document.undo_len(), history);
+        assert!(!app.document.can_redo());
+    }
+
+    #[test]
+    fn committing_preview_while_playing_does_not_mutate_the_scene() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create entity");
+        app.play();
+        app.preview.insert(
+            1,
+            Transform {
+                translation: [9.0, 0.0, 0.0],
+                ..Transform::default()
+            },
+        );
+
+        commit_preview(&mut app);
+
+        assert_eq!(
+            app.document.scene().entities[0].transform,
+            Transform::default()
+        );
+        assert!(
+            app.status_log
+                .last()
+                .is_some_and(|entry| entry.message.contains("Detén"))
+        );
+        app.stop_play();
+    }
+
+    #[test]
+    fn group_move_handle_sits_at_the_center_of_the_selection() {
+        let mut first = item(1, Pos2::new(100.0, 100.0));
+        let mut second = item(2, Pos2::new(300.0, 200.0));
+        first.selected = true;
+        second.selected = true;
+        let items = [first, second];
+        assert_eq!(
+            selection_center(&items),
+            Some(Pos2::new(200.0, 150.0)),
+            "el tirador debe estar en el centro del rectángulo que envuelve la selección"
+        );
+        assert_eq!(
+            multi_move_at(&items, Pos2::new(200.0, 150.0), TransformMode::Move),
+            Some(vec![1, 2])
+        );
+        assert_eq!(
+            multi_move_at(&items, Pos2::new(260.0, 150.0), TransformMode::Move),
+            None
+        );
+        assert_eq!(
+            multi_move_at(&items, Pos2::new(200.0, 150.0), TransformMode::Scale),
+            None
+        );
+    }
+
+    #[test]
+    fn group_move_handle_needs_more_than_one_selected_entity() {
+        let mut only = item(7, Pos2::new(100.0, 100.0));
+        only.selected = true;
+        assert_eq!(
+            multi_move_at(&[only], Pos2::new(100.0, 100.0), TransformMode::Move),
+            None
+        );
     }
 }

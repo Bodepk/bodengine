@@ -4,6 +4,7 @@
 //! y un historial de comandos. Toda mutación se valida con las reglas de
 //! ADR-008 antes de entrar en el historial.
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::path::Path;
@@ -48,6 +49,8 @@ pub enum EditorCommand {
     CreateEntity { id: u64, name: Option<String> },
     /// Borra una entidad y rearma a sus hijos con su padre.
     DeleteEntity { id: u64 },
+    /// Borra varias entidades como una sola operación (E12).
+    DeleteEntities { ids: Vec<u64> },
     /// Cambia el nombre de una entidad.
     RenameEntity { id: u64, name: Option<String> },
     /// Cambia el padre de una entidad; `None` la convierte en raíz.
@@ -68,6 +71,11 @@ pub enum EditorCommand {
     MoveEntity { id: u64, to: usize },
     /// Clona una entidad con un identificador nuevo (ADR-020).
     DuplicateEntity { id: u64, new_id: u64 },
+    /// Aplica varias transformaciones como una sola operación (E12).
+    ///
+    /// Es la forma en que un arrastre con multi-selección produce un único
+    /// paso de undo. Un id desconocido invalida todo el comando.
+    SetTransforms { transforms: Vec<(u64, Transform)> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -254,6 +262,28 @@ fn mutate(
             }
             selection.retain(|selected| selected != id);
         }
+        EditorCommand::DeleteEntities { ids } => {
+            // Validar el lote completo antes de tocar la escena: así un id
+            // desconocido no deja una multiselección borrada a medias.
+            for id in ids {
+                position_of(scene, *id)?;
+            }
+            let parents: HashMap<u64, Option<u64>> = scene
+                .entities
+                .iter()
+                .map(|entity| (entity.id, entity.parent))
+                .collect();
+            for id in ids {
+                let position = position_of(scene, *id)?;
+                let removed = scene.entities.remove(position);
+                for entity in &mut scene.entities {
+                    if entity.parent == Some(*id) {
+                        entity.parent = surviving_parent(&parents, ids, removed.parent);
+                    }
+                }
+            }
+            selection.retain(|selected| !ids.contains(selected));
+        }
         EditorCommand::RenameEntity { id, name } => {
             entity_mut(scene, *id)?.name = name.clone();
         }
@@ -305,8 +335,33 @@ fn mutate(
             scene.entities.push(entity);
             *selection = vec![*new_id];
         }
+        EditorCommand::SetTransforms { transforms } => {
+            // `scene` ya es una copia: validamos todos los ids antes de escribir
+            // para que un lote inválido no deje una escena a medias.
+            for (id, _) in transforms {
+                position_of(scene, *id)?;
+            }
+            for (id, transform) in transforms {
+                entity_mut(scene, *id)?.transform = *transform;
+            }
+        }
     }
     Ok(())
+}
+
+/// Primer ancestro que sobrevive al lote de borrado, o `None` si no hay ninguno.
+fn surviving_parent(
+    parents: &HashMap<u64, Option<u64>>,
+    removed: &[u64],
+    mut parent: Option<u64>,
+) -> Option<u64> {
+    while let Some(id) = parent {
+        if !removed.contains(&id) {
+            return Some(id);
+        }
+        parent = parents.get(&id).copied().flatten();
+    }
+    None
 }
 
 fn position_of(scene: &Scene, id: u64) -> Result<usize, EditorError> {
@@ -697,5 +752,166 @@ mod tests {
         );
         assert!(document.undo());
         assert_eq!(document.scene().entities.len(), 1);
+    }
+
+    #[test]
+    fn set_transforms_is_one_atomic_undo_step() {
+        let mut document = EditorDocument::new();
+        for id in 1..=3 {
+            document
+                .apply(EditorCommand::CreateEntity {
+                    id,
+                    name: Some(format!("E{id}")),
+                })
+                .expect("create");
+        }
+        let history = document.undo_len();
+        let transforms = vec![
+            (
+                1,
+                Transform {
+                    translation: [1.0, 0.0, 0.0],
+                    ..Transform::default()
+                },
+            ),
+            (
+                3,
+                Transform {
+                    translation: [3.0, 0.0, 0.0],
+                    ..Transform::default()
+                },
+            ),
+        ];
+        document
+            .apply(EditorCommand::SetTransforms {
+                transforms: transforms.clone(),
+            })
+            .expect("batch");
+
+        assert_eq!(document.undo_len(), history + 1);
+        assert_eq!(document.scene().entities[0].transform.translation[0], 1.0);
+        assert_eq!(document.scene().entities[1].transform, Transform::default());
+        assert_eq!(document.scene().entities[2].transform.translation[0], 3.0);
+
+        assert!(document.undo());
+        assert_eq!(document.scene().entities[0].transform, Transform::default());
+        assert_eq!(document.scene().entities[2].transform, Transform::default());
+        assert!(document.redo());
+        assert_eq!(document.scene().entities[0].transform.translation[0], 1.0);
+    }
+
+    #[test]
+    fn an_invalid_transform_batch_leaves_the_scene_untouched() {
+        let mut document = EditorDocument::new();
+        document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create");
+        let before = document.scene().clone();
+        let history = document.undo_len();
+
+        let result = document.apply(EditorCommand::SetTransforms {
+            transforms: vec![
+                (
+                    1,
+                    Transform {
+                        translation: [9.0, 0.0, 0.0],
+                        ..Transform::default()
+                    },
+                ),
+                (
+                    404,
+                    Transform {
+                        translation: [7.0, 0.0, 0.0],
+                        ..Transform::default()
+                    },
+                ),
+            ],
+        });
+
+        assert!(result.is_err());
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), history);
+        assert!(!document.redo());
+    }
+
+    fn chain_document() -> EditorDocument {
+        let mut document = EditorDocument::new();
+        for id in 1..=4 {
+            document
+                .apply(EditorCommand::CreateEntity { id, name: None })
+                .expect("create");
+        }
+        document
+            .apply(EditorCommand::SetParent {
+                id: 2,
+                parent: Some(1),
+            })
+            .expect("parent 2");
+        document
+            .apply(EditorCommand::SetParent {
+                id: 3,
+                parent: Some(2),
+            })
+            .expect("parent 3");
+        document
+    }
+
+    #[test]
+    fn deleting_a_multi_selection_is_one_undo_step() {
+        let mut document = chain_document();
+        document.select(&[2, 3]);
+        let history = document.undo_len();
+
+        document
+            .apply(EditorCommand::DeleteEntities { ids: vec![2, 3] })
+            .expect("delete batch");
+
+        assert_eq!(document.undo_len(), history + 1);
+        let ids: Vec<u64> = document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![1, 4]);
+        assert!(document.selection().is_empty());
+
+        assert!(document.undo());
+        let ids: Vec<u64> = document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![1, 2, 3, 4]);
+        assert_eq!(document.scene().entities[1].parent, Some(1));
+        assert_eq!(document.scene().entities[2].parent, Some(2));
+    }
+
+    #[test]
+    fn deleting_a_parent_reparents_surviving_children_to_its_parent() {
+        let mut document = chain_document();
+        document
+            .apply(EditorCommand::DeleteEntities { ids: vec![2] })
+            .expect("delete parent");
+
+        let remaining: Vec<&SceneEntity> = document.scene().entities.iter().collect();
+        assert_eq!(remaining.len(), 3);
+        assert_eq!(remaining[1].id, 3);
+        assert_eq!(remaining[1].parent, Some(1));
+    }
+
+    #[test]
+    fn an_invalid_delete_batch_leaves_the_scene_untouched() {
+        let mut document = chain_document();
+        let before = document.scene().clone();
+        let history = document.undo_len();
+
+        let result = document.apply(EditorCommand::DeleteEntities { ids: vec![1, 404] });
+
+        assert!(result.is_err());
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), history);
+        assert!(!document.redo());
     }
 }

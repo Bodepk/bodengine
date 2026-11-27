@@ -26,7 +26,13 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
         return;
     };
 
+    let selection_count = app.document.selection().len();
     ui.heading(format!("Inspector · #{id}"));
+    if selection_count > 1 {
+        ui.label(format!(
+            "{selection_count} entidades seleccionadas · los cambios de este panel afectan a #{id}"
+        ));
+    }
     ui.label("Nombre");
     let name_response =
         ui.add(egui::TextEdit::singleline(&mut app.name_buffer).hint_text("Sin nombre"));
@@ -179,4 +185,53 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
 
     ui.separator();
     component_editor_ui(app, ui);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Pos2, Rect};
+
+    #[test]
+    fn multi_selection_shows_which_entity_the_inspector_edits() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        for id in 1..=2 {
+            app.document
+                .apply(EditorCommand::CreateEntity { id, name: None })
+                .expect("create entity");
+        }
+        app.select_clicked(1, false, false);
+        app.select_clicked(2, true, false);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut second = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        second.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        output.textures_delta.clear();
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("2 entidades seleccionadas")),
+            "{texts:?}"
+        );
+    }
 }

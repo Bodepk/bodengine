@@ -31,6 +31,72 @@ pub(crate) fn child_ids(scene: &Scene, parent: u64) -> Vec<u64> {
         .collect()
 }
 
+/// IDs en orden de dibujo de la jerarquía (padres antes que hijos).
+#[must_use]
+pub(crate) fn hierarchy_ids(scene: &Scene) -> Vec<u64> {
+    fn walk(scene: &Scene, parent: Option<u64>, out: &mut Vec<u64>) {
+        for entity in &scene.entities {
+            if entity.parent == parent {
+                out.push(entity.id);
+                walk(scene, Some(entity.id), out);
+            }
+        }
+    }
+
+    let mut ids = Vec::with_capacity(scene.entities.len());
+    walk(scene, None, &mut ids);
+    for entity in &scene.entities {
+        if !ids.contains(&entity.id) {
+            ids.push(entity.id);
+        }
+    }
+    ids
+}
+
+/// Selección resultante de clic normal (reemplaza) o Ctrl+clic (alterna).
+#[must_use]
+pub(crate) fn toggle_selection(current: &[u64], id: u64, additive: bool) -> Vec<u64> {
+    if !additive {
+        return vec![id];
+    }
+    let mut next = current.to_vec();
+    if let Some(index) = next.iter().position(|selected| *selected == id) {
+        next.remove(index);
+    } else {
+        next.push(id);
+    }
+    next
+}
+
+/// Rango contiguo entre dos IDs según el orden de la jerarquía, en ambos sentidos.
+#[must_use]
+pub(crate) fn range_ids(ordered: &[u64], anchor: u64, target: u64) -> Vec<u64> {
+    let (Some(start), Some(end)) = (
+        ordered.iter().position(|id| *id == anchor),
+        ordered.iter().position(|id| *id == target),
+    ) else {
+        return Vec::new();
+    };
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    ordered[start..=end].to_vec()
+}
+
+/// Añade IDs a la selección sin duplicados, conservando el orden previo.
+#[must_use]
+pub(crate) fn union_selection(current: &[u64], extra: &[u64]) -> Vec<u64> {
+    let mut next = current.to_vec();
+    for id in extra {
+        if !next.contains(id) {
+            next.push(*id);
+        }
+    }
+    next
+}
+
 pub(crate) fn image_component(asset: &str) -> Component {
     Component::Image {
         asset: lunar_scenes::normalize_asset_path(asset),
@@ -279,5 +345,39 @@ mod tests {
     fn snap_uses_quarter_unit_step() {
         assert_eq!(snap_to_grid(1.13), 1.25);
         assert_eq!(snap_to_grid(-0.12), 0.0);
+    }
+
+    #[test]
+    fn toggle_selection_replaces_or_alternates() {
+        assert_eq!(toggle_selection(&[1, 2], 3, false), vec![3]);
+        assert_eq!(toggle_selection(&[1, 2], 3, true), vec![1, 2, 3]);
+        assert_eq!(toggle_selection(&[1, 2], 1, true), vec![2]);
+        assert_eq!(toggle_selection(&[1, 2], 9, true), vec![1, 2, 9]);
+    }
+
+    #[test]
+    fn range_ids_are_inclusive_and_work_backwards() {
+        let ordered = [1, 4, 7, 9];
+        assert_eq!(range_ids(&ordered, 4, 9), vec![4, 7, 9]);
+        assert_eq!(range_ids(&ordered, 9, 4), vec![4, 7, 9]);
+        assert_eq!(range_ids(&ordered, 7, 7), vec![7]);
+        assert!(range_ids(&ordered, 1, 99).is_empty());
+    }
+
+    #[test]
+    fn union_selection_keeps_order_and_deduplicates() {
+        assert_eq!(union_selection(&[9, 1], &[1, 4, 9]), vec![9, 1, 4]);
+        assert_eq!(union_selection(&[], &[2]), vec![2]);
+    }
+
+    #[test]
+    fn hierarchy_ids_walk_parents_before_children() {
+        let mut scene = Scene::new();
+        for id in [4, 3, 2, 1] {
+            scene.entities.push(SceneEntity::new(id));
+        }
+        scene.entities[1].parent = Some(4);
+        scene.entities[3].parent = Some(2);
+        assert_eq!(hierarchy_ids(&scene), vec![4, 3, 2, 1]);
     }
 }

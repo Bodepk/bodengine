@@ -9,7 +9,10 @@ use lunar_scenes::{Component, Scene, SceneError, Transform, normalize_asset_path
 use crate::assets::{AssetKind, AssetLibrary, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
 use crate::file_picker::{FilePicker, PickerMode, absolute_dir, parent_dir};
-use crate::helpers::{audio_component, collider2_component, image_component, next_entity_id};
+use crate::helpers::{
+    audio_component, collider2_component, hierarchy_ids, image_component, next_entity_id,
+    range_ids, toggle_selection, union_selection,
+};
 use crate::layout;
 use crate::play::{PlayState, dynamic_ids, floor_y, step_vertical};
 use crate::recent;
@@ -54,6 +57,8 @@ pub(crate) struct EditorApp {
     pub(crate) rotation_degrees: [f32; 3],
     pub(crate) scale: [f32; 3],
     pub(crate) component_edit: Option<ComponentEdit>,
+    /// Última entidad usada como ancla para la selección por rango (E12).
+    selection_anchor: Option<u64>,
     synced_selection: Vec<u64>,
     synced_revision: u64,
     revision: u64,
@@ -129,6 +134,7 @@ impl EditorApp {
             rotation_degrees: [0.0; 3],
             scale: [1.0; 3],
             component_edit: None,
+            selection_anchor: None,
             synced_selection: Vec::new(),
             synced_revision: 0,
             revision: 0,
@@ -201,6 +207,38 @@ impl EditorApp {
         }
     }
 
+    /// Selección compartida por jerarquía, lienzo 2D y vista 3D (E12): el clic
+    /// normal reemplaza, Ctrl alterna y Shift amplía el rango desde el ancla.
+    pub(crate) fn select_clicked(&mut self, id: u64, ctrl: bool, shift: bool) {
+        if shift {
+            let range = self
+                .selection_anchor
+                .and_then(|anchor| {
+                    let ordered = hierarchy_ids(self.document.scene());
+                    let range = range_ids(&ordered, anchor, id);
+                    (!range.is_empty()).then_some(range)
+                })
+                .unwrap_or_else(|| vec![id]);
+            let next = union_selection(self.document.selection(), &range);
+            self.document.select(&next);
+            return;
+        }
+        if ctrl {
+            let next = toggle_selection(self.document.selection(), id, true);
+            self.document.select(&next);
+        } else {
+            self.document.select(&[id]);
+        }
+        self.selection_anchor = Some(id);
+    }
+
+    /// Limpia la selección y su ancla para que un Shift posterior no herede un
+    /// rango de otra escena.
+    pub(crate) fn clear_selection(&mut self) {
+        self.document.select(&[]);
+        self.selection_anchor = None;
+    }
+
     /// Persiste las preferencias de la GUI (ADR-031). Un fallo de escritura no
     /// altera el estado del editor.
     pub(crate) fn save_settings(&self) {
@@ -270,6 +308,7 @@ impl EditorApp {
         match EditorDocument::load_from_path(&path) {
             Ok(document) => {
                 self.document = document;
+                self.selection_anchor = None;
                 self.path = path.clone();
                 self.path_text = path.to_string_lossy().into_owned();
                 self.preview.clear();
@@ -373,6 +412,7 @@ impl EditorApp {
 
     pub(crate) fn new_document(&mut self) {
         self.document = EditorDocument::new();
+        self.selection_anchor = None;
         self.preview.clear();
         self.drag = CanvasDrag::None;
         self.path = PathBuf::from("scene.json");
@@ -386,8 +426,8 @@ impl EditorApp {
             return;
         }
         let ids = self.document.selection().to_vec();
-        for id in ids {
-            self.apply(EditorCommand::DeleteEntity { id });
+        if !ids.is_empty() {
+            self.apply(EditorCommand::DeleteEntities { ids });
         }
     }
 
@@ -554,7 +594,10 @@ impl EditorApp {
             // ocurrir. Se restaura solo en ese caso para no perder el historial
             // de undo/redo en el camino normal (E6).
             match EditorDocument::from_scene(snapshot) {
-                Ok(document) => self.document = document,
+                Ok(document) => {
+                    self.document = document;
+                    self.selection_anchor = None;
+                }
                 Err(error) => self.set_status(format!("No se pudo restaurar: {error}")),
             }
         }
@@ -1031,5 +1074,118 @@ mod tests {
             output.textures_delta.clear();
             assert_eq!(app.transform_mode, expected);
         }
+    }
+
+    fn app_with_entities(count: u64) -> EditorApp {
+        let mut app = fresh_app();
+        for id in 1..=count {
+            app.document
+                .apply(EditorCommand::CreateEntity {
+                    id,
+                    name: Some(format!("E{id}")),
+                })
+                .expect("create entity");
+        }
+        app
+    }
+
+    #[test]
+    fn ctrl_click_toggles_selection_without_losing_other_entities() {
+        let mut app = app_with_entities(4);
+        app.select_clicked(1, false, false);
+        assert_eq!(app.document.selection(), &[1]);
+        app.select_clicked(3, true, false);
+        assert_eq!(app.document.selection(), &[1, 3]);
+        app.select_clicked(1, true, false);
+        assert_eq!(app.document.selection(), &[3]);
+        app.select_clicked(404, true, false);
+        assert_eq!(app.document.selection(), &[3]);
+    }
+
+    #[test]
+    fn shift_click_extends_the_range_from_the_last_anchor() {
+        let mut app = app_with_entities(5);
+        app.select_clicked(2, false, false);
+        app.select_clicked(5, true, true);
+        assert_eq!(app.document.selection(), &[2, 3, 4, 5]);
+        // El ancla no cambia con Shift: seguir ampliando o recortar el rango
+        // parte siempre de la misma entidad.
+        app.select_clicked(4, true, true);
+        assert_eq!(app.document.selection(), &[2, 3, 4, 5]);
+        app.select_clicked(1, false, false);
+        app.select_clicked(3, true, true);
+        assert_eq!(app.document.selection(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn shift_click_follows_hierarchy_order_not_scene_order() {
+        let mut app = fresh_app();
+        for id in [1, 3, 2] {
+            app.document
+                .apply(EditorCommand::CreateEntity {
+                    id,
+                    name: Some(format!("E{id}")),
+                })
+                .expect("create entity");
+        }
+        app.document
+            .apply(EditorCommand::SetParent {
+                id: 3,
+                parent: Some(1),
+            })
+            .expect("set parent");
+        app.select_clicked(1, false, false);
+        app.select_clicked(2, true, true);
+        assert_eq!(app.document.selection(), &[1, 3, 2]);
+    }
+
+    #[test]
+    fn clearing_selection_resets_the_range_anchor() {
+        let mut app = app_with_entities(5);
+        app.select_clicked(2, false, false);
+        app.clear_selection();
+        assert!(app.document.selection().is_empty());
+        app.select_clicked(5, true, true);
+        assert_eq!(app.document.selection(), &[5]);
+    }
+
+    #[test]
+    fn deleting_a_multi_selection_is_a_single_undo_step() {
+        let mut app = app_with_entities(3);
+        app.select_clicked(1, false, false);
+        app.select_clicked(3, true, false);
+        let history = app.document.undo_len();
+
+        app.delete_selected();
+
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert_eq!(app.document.scene().entities.len(), 1);
+        assert_eq!(app.document.scene().entities[0].id, 2);
+        assert!(app.document.selection().is_empty());
+        app.document.undo();
+        assert_eq!(app.document.scene().entities.len(), 3);
+    }
+
+    #[test]
+    fn hierarchy_and_canvas_read_the_same_selection() {
+        let ctx = Context::default();
+        let mut app = app_with_entities(3);
+        app.select_clicked(1, false, false);
+        app.select_clicked(3, true, false);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Paneles").show(ctx, |ui| {
+                crate::hierarchy::hierarchy_ui(&mut app, ui);
+                crate::canvas::canvas_ui(&mut app, ui);
+            });
+        });
+        output.textures_delta.clear();
+        assert_eq!(app.document.selection(), &[1, 3]);
     }
 }

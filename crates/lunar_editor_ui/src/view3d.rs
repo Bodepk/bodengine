@@ -541,7 +541,6 @@ fn handle_selection(
         };
     }
     if response.clicked() {
-        let additive = ui.input(|input| input.modifiers.shift || input.modifiers.ctrl);
         let hit = app
             .document
             .scene()
@@ -556,20 +555,12 @@ fn handle_selection(
                 }
             })
             .map(|entity| entity.id);
-        let mut selection = if additive {
-            app.document.selection().to_vec()
-        } else {
-            Vec::new()
-        };
-        match hit {
-            Some(id) if additive && selection.contains(&id) => {
-                selection.retain(|selected| *selected != id);
-            }
-            Some(id) if !selection.contains(&id) => selection.push(id),
-            None if !additive => {}
-            _ => {}
+        let (ctrl, shift) = ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
+        if let Some(id) = hit {
+            app.select_clicked(id, ctrl, shift);
+        } else if !ctrl && !shift {
+            app.clear_selection();
         }
-        app.document.select(&selection);
     }
 }
 
