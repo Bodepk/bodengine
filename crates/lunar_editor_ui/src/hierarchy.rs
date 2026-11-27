@@ -210,9 +210,11 @@ fn entity_row(app: &mut EditorApp, ui: &mut Ui, id: u64, depth: usize) {
 }
 
 fn payload_source(ui: &Ui) -> Option<u64> {
-    let payload = DragAndDrop::take_payload::<String>(ui.ctx())?;
+    let payload = DragAndDrop::payload::<String>(ui.ctx())?;
     let source = payload.strip_prefix(ENTITY_PAYLOAD_PREFIX)?;
-    source.parse::<u64>().ok()
+    let id = source.parse::<u64>().ok()?;
+    DragAndDrop::clear_payload(ui.ctx());
+    Some(id)
 }
 
 fn handle_entity_drop(app: &mut EditorApp, ui: &Ui, rect: egui::Rect, target: u64) {

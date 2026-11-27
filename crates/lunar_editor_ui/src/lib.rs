@@ -10,6 +10,7 @@ mod canvas;
 mod components;
 mod config;
 mod dialogs;
+mod dnd;
 mod file_picker;
 mod gizmo;
 mod guids;

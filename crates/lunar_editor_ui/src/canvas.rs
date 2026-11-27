@@ -5,12 +5,11 @@
 
 use std::sync::Arc;
 
-use egui::{Color32, DragAndDrop, PointerButton, Pos2, Rect, Sense, Stroke, TextureId, Ui, Vec2};
+use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, TextureId, Ui, Vec2};
 use lunar_editor::EditorCommand;
 use lunar_scenes::{Component, Transform};
 
 use crate::app::EditorApp;
-use crate::assets::ASSET_PAYLOAD_PREFIX;
 use crate::gizmo::{Originals, reference, reference_angle};
 use crate::helpers::{angle_from_quaternion, contains_point, image_world_size, snap_to_grid};
 use crate::play::PlayState;
@@ -584,12 +583,10 @@ fn handle_drop(app: &mut EditorApp, ui: &mut Ui, rect: Rect, pointer: Option<Pos
     let Some(pointer) = pointer.filter(|point| rect.contains(*point)) else {
         return;
     };
-    let Some(payload) = DragAndDrop::take_payload::<String>(ui.ctx()) else {
+    let Some(drag) = crate::dnd::take_asset(ui.ctx()) else {
         return;
     };
-    let Some(asset) = payload.strip_prefix(ASSET_PAYLOAD_PREFIX) else {
-        return;
-    };
+    let asset = drag.path.as_str();
     let world = screen_to_world(
         pointer,
         rect,

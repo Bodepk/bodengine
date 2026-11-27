@@ -3,10 +3,11 @@
 //! Toda la geometría y la proyección son funciones puras, sin GPU ni types de
 //! `wgpu`. La vista se dibuja con el mismo `egui::Painter` del lienzo 2D.
 
-use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, PointerButton, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
 use lunar_scenes::{Component, SceneEntity, Transform};
 
 use crate::app::EditorApp;
+use crate::assets::AssetKind;
 use crate::gizmo::{Originals, group_pivot, space_axes, translate_group};
 use crate::play::PlayState;
 use crate::tools::{TransformMode, TransformSpace};
@@ -655,6 +656,7 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
     handle_selection(app, ui, rect, app.camera3d, &response);
     apply_gizmo(app, rect, app.camera3d, pointer);
     finish_drag(app, ui);
+    handle_drop(app, ui, rect, &response);
     ui.painter().text(
         rect.min + Vec2::new(8.0, rect.height() - 8.0),
         egui::Align2::LEFT_BOTTOM,
@@ -665,6 +667,27 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
         egui::FontId::proportional(11.0),
         Color32::from_gray(210),
     );
+}
+
+/// Suelta de un asset en la vista 3D: solo las mallas crean una entidad.
+fn handle_drop(app: &mut EditorApp, ui: &Ui, rect: Rect, response: &Response) {
+    if !ui.input(|input| input.pointer.any_released()) {
+        return;
+    }
+    if !response
+        .hover_pos()
+        .is_some_and(|point| rect.contains(point))
+    {
+        return;
+    }
+    let Some(drag) = crate::dnd::take_asset(ui.ctx()) else {
+        return;
+    };
+    if drag.kind != AssetKind::Mesh {
+        app.set_status("La vista 3D solo acepta mallas glTF");
+        return;
+    }
+    app.create_entity_from_asset(&drag.path, [0.0, 0.0]);
 }
 
 #[cfg(test)]

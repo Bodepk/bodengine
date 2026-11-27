@@ -6,7 +6,7 @@ use egui::{Context, Ui};
 use lunar_editor::{EditorCommand, EditorDocument, EditorError};
 use lunar_scenes::{Component, Scene, SceneEntity, SceneError, Transform, normalize_asset_path};
 
-use crate::assets::{AssetKind, AssetLibrary, assets_ui};
+use crate::assets::{AssetKind, AssetLibrary, AssetView, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
 use crate::file_picker::{FilePicker, PickerMode, absolute_dir, parent_dir};
 use crate::helpers::{
@@ -84,6 +84,7 @@ pub(crate) struct EditorApp {
     pub(crate) asset_search: String,
     pub(crate) asset_folder: String,
     pub(crate) asset_kind_filter: Option<AssetKind>,
+    pub(crate) asset_view: AssetView,
     pub(crate) selected_asset: Option<String>,
     /// Opciones del asset seleccionado y ruta a la que pertenecen (E17).
     pub(crate) asset_options: ImportOptions,
@@ -175,6 +176,7 @@ impl EditorApp {
             asset_search: String::new(),
             asset_folder: String::new(),
             asset_kind_filter: None,
+            asset_view: AssetView::default(),
             selected_asset: None,
             asset_options: ImportOptions::default(),
             asset_options_path: None,

@@ -160,10 +160,25 @@ fn clip_id_salt(index: usize) -> String {
 }
 
 fn asset_ui(ui: &mut Ui, asset: &mut String, changed: &mut bool) {
-    text_ui(ui, "Asset", asset, changed);
+    let response = text_ui(ui, "Asset", asset, changed);
+    if crate::dnd::has_asset(ui.ctx()) {
+        ui.painter().rect_filled(
+            response.rect,
+            2.0,
+            egui::Color32::from_rgba_unmultiplied(90, 170, 255, 48),
+        );
+    }
+    let pointer = ui.input(|input| input.pointer.latest_pos());
+    let released_inside = ui.input(|input| input.pointer.any_released())
+        && pointer.is_some_and(|point| response.rect.contains(point));
+    if released_inside && let Some(drag) = crate::dnd::take_asset(ui.ctx()) {
+        *asset = drag.path;
+        *changed = true;
+    }
+    response.on_hover_text("Arrastra un asset desde el panel de Assets");
 }
 
-fn text_ui(ui: &mut Ui, label: &str, value: &mut String, changed: &mut bool) {
+fn text_ui(ui: &mut Ui, label: &str, value: &mut String, changed: &mut bool) -> egui::Response {
     ui.label(label);
     let before = value.clone();
     let response = ui.add(egui::TextEdit::singleline(value).desired_width(240.0));
@@ -171,6 +186,7 @@ fn text_ui(ui: &mut Ui, label: &str, value: &mut String, changed: &mut bool) {
     if (response.lost_focus() || enter) && *value != before {
         *changed = true;
     }
+    response
 }
 
 fn u32_ui(ui: &mut Ui, label: &str, value: &mut u32) -> bool {

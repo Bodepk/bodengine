@@ -24,6 +24,32 @@ pub(crate) enum AssetKind {
     Mesh,
 }
 
+impl AssetKind {
+    /// Clasifica una ruta relativa ya normalizada, usada por el payload de DnD.
+    #[must_use]
+    pub(crate) fn from_path(path: &str) -> Option<Self> {
+        classify_asset(Path::new(path))
+    }
+}
+
+/// Forma de presentar los assets del content browser (E18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum AssetView {
+    #[default]
+    List,
+    Grid,
+}
+
+impl AssetView {
+    #[must_use]
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::List => "Lista",
+            Self::Grid => "Miniaturas",
+        }
+    }
+}
+
 /// Entrada listada en el panel de assets.
 #[derive(Debug, Clone)]
 pub(crate) struct AssetEntry {
@@ -212,6 +238,144 @@ fn collect_files(root: &Path, directory: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+fn draw_list(app: &mut EditorApp, ui: &mut Ui, visible: &[AssetEntry]) {
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for entry in visible {
+            asset_row_ui(app, ui, entry);
+        }
+    });
+}
+
+fn draw_grid(app: &mut EditorApp, ui: &mut Ui, visible: &[AssetEntry]) {
+    let columns = (ui.available_width() / 104.0).floor().max(1.0) as usize;
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for row in visible.chunks(columns) {
+            ui.horizontal(|ui| {
+                for entry in row {
+                    asset_tile_ui(app, ui, entry);
+                }
+            });
+        }
+    });
+}
+
+fn asset_background(app: &EditorApp, entry: &AssetEntry, hovered: bool) -> Color32 {
+    if app.selected_asset.as_deref() == Some(entry.path.as_str()) {
+        Color32::from_rgb(50, 70, 100)
+    } else if hovered {
+        Color32::from_gray(60)
+    } else {
+        Color32::from_gray(42)
+    }
+}
+
+fn asset_interactions(app: &mut EditorApp, ui: &Ui, entry: &AssetEntry, response: egui::Response) {
+    if response.clicked() {
+        app.selected_asset = Some(entry.path.clone());
+    }
+    if response.double_clicked() {
+        app.create_entity_from_asset(&entry.path, app.view_center);
+    }
+    if response.drag_started() {
+        crate::dnd::set_asset(
+            ui.ctx(),
+            crate::dnd::AssetDrag::new(entry.path.clone(), entry.kind),
+        );
+    }
+    response.on_hover_text(&entry.path);
+}
+
+fn asset_row_ui(app: &mut EditorApp, ui: &mut Ui, entry: &AssetEntry) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(224.0, 46.0), Sense::click_and_drag());
+    ui.painter()
+        .rect_filled(rect, 4.0, asset_background(app, entry, response.hovered()));
+
+    if entry.kind == AssetKind::Image {
+        if let Some(texture) = app.assets.texture(&entry.path) {
+            let thumb = egui::Rect::from_min_size(rect.min, Vec2::new(42.0, 42.0));
+            ui.painter().image(
+                texture.id(),
+                thumb,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+    } else {
+        let label = match entry.kind {
+            AssetKind::Audio => "A",
+            AssetKind::Mesh => "M",
+            AssetKind::Image => "I",
+        };
+        ui.painter().text(
+            rect.min + Vec2::new(12.0, 12.0),
+            egui::Align2::LEFT_TOP,
+            label,
+            egui::FontId::proportional(18.0),
+            Color32::LIGHT_BLUE,
+        );
+    }
+
+    let text_position = rect.min + Vec2::new(48.0, 8.0);
+    ui.painter().text(
+        text_position,
+        egui::Align2::LEFT_TOP,
+        entry.path.clone(),
+        egui::FontId::proportional(12.0),
+        Color32::from_gray(220),
+    );
+    if let Some(dimensions) = app.assets.dimensions(&entry.path) {
+        ui.painter().text(
+            text_position + Vec2::new(0.0, 16.0),
+            egui::Align2::LEFT_TOP,
+            format!("{}×{} px", dimensions[0], dimensions[1]),
+            egui::FontId::proportional(10.0),
+            Color32::GRAY,
+        );
+    }
+    asset_interactions(app, ui, entry, response);
+}
+
+fn asset_tile_ui(app: &mut EditorApp, ui: &mut Ui, entry: &AssetEntry) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(96.0, 82.0), Sense::click_and_drag());
+    ui.painter()
+        .rect_filled(rect, 4.0, asset_background(app, entry, response.hovered()));
+
+    if entry.kind == AssetKind::Image {
+        if let Some(texture) = app.assets.texture(&entry.path) {
+            let thumb =
+                egui::Rect::from_min_size(rect.min + Vec2::new(2.0, 2.0), Vec2::new(92.0, 52.0));
+            ui.painter().image(
+                texture.id(),
+                thumb,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+    } else {
+        let label = match entry.kind {
+            AssetKind::Audio => "A",
+            AssetKind::Mesh => "M",
+            AssetKind::Image => "I",
+        };
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(22.0),
+            Color32::LIGHT_BLUE,
+        );
+    }
+
+    ui.painter().text(
+        rect.min + Vec2::new(4.0, 58.0),
+        egui::Align2::LEFT_TOP,
+        entry.path.clone(),
+        egui::FontId::proportional(10.0),
+        Color32::from_gray(220),
+    );
+    asset_interactions(app, ui, entry, response);
+}
+
 pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.heading("Assets");
     ui.add(
@@ -276,6 +440,24 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
     });
     app.asset_kind_filter = kind;
 
+    ui.horizontal(|ui| {
+        ui.label("Vista");
+        let mut view = app.asset_view;
+        if ui
+            .selectable_label(view == AssetView::List, AssetView::List.label())
+            .clicked()
+        {
+            view = AssetView::List;
+        }
+        if ui
+            .selectable_label(view == AssetView::Grid, AssetView::Grid.label())
+            .clicked()
+        {
+            view = AssetView::Grid;
+        }
+        app.asset_view = view;
+    });
+
     let filter = AssetFilter {
         folder: app.asset_folder.clone(),
         query: app.asset_search.clone(),
@@ -295,78 +477,10 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
     ));
     ui.separator();
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        for entry in &visible {
-            let (rect, response) =
-                ui.allocate_exact_size(Vec2::new(224.0, 46.0), Sense::click_and_drag());
-            let selected = app.selected_asset.as_deref() == Some(entry.path.as_str());
-            let background = if selected {
-                Color32::from_rgb(50, 70, 100)
-            } else if response.hovered() {
-                Color32::from_gray(60)
-            } else {
-                Color32::from_gray(42)
-            };
-            ui.painter().rect_filled(rect, 4.0, background);
-
-            if entry.kind == AssetKind::Image {
-                if let Some(texture) = app.assets.texture(&entry.path) {
-                    let thumb = egui::Rect::from_min_size(rect.min, Vec2::new(42.0, 42.0));
-                    ui.painter().image(
-                        texture.id(),
-                        thumb,
-                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                }
-            } else {
-                let label = match entry.kind {
-                    AssetKind::Audio => "A",
-                    AssetKind::Mesh => "M",
-                    AssetKind::Image => "I",
-                };
-                ui.painter().text(
-                    rect.min + Vec2::new(12.0, 12.0),
-                    egui::Align2::LEFT_TOP,
-                    label,
-                    egui::FontId::proportional(18.0),
-                    Color32::LIGHT_BLUE,
-                );
-            }
-
-            let text_position = rect.min + Vec2::new(48.0, 8.0);
-            ui.painter().text(
-                text_position,
-                egui::Align2::LEFT_TOP,
-                entry.path.clone(),
-                egui::FontId::proportional(12.0),
-                Color32::from_gray(220),
-            );
-            if let Some(dimensions) = app.assets.dimensions(&entry.path) {
-                ui.painter().text(
-                    text_position + Vec2::new(0.0, 16.0),
-                    egui::Align2::LEFT_TOP,
-                    format!("{}×{} px", dimensions[0], dimensions[1]),
-                    egui::FontId::proportional(10.0),
-                    Color32::GRAY,
-                );
-            }
-
-            if response.clicked() {
-                app.selected_asset = Some(entry.path.clone());
-            }
-            if response.double_clicked() {
-                app.create_entity_from_asset(&entry.path, app.view_center);
-            }
-            if response.drag_started() {
-                egui::DragAndDrop::set_payload(
-                    ui.ctx(),
-                    format!("{ASSET_PAYLOAD_PREFIX}{}", entry.path),
-                );
-            }
-            response.on_hover_text(&entry.path);
-        }
-    });
+    match app.asset_view {
+        AssetView::List => draw_list(app, ui, &visible),
+        AssetView::Grid => draw_grid(app, ui, &visible),
+    }
 
     ui.separator();
     app.refresh_asset_options();
@@ -702,5 +816,30 @@ mod tests {
         let texts = rendered_asset_panel(&mut app, &ctx);
         assert!(texts.iter().any(|text| text.contains("Escala glTF")));
         assert!(texts.iter().any(|text| text.contains("Materiales")));
+    }
+
+    #[test]
+    fn asset_panel_offers_list_and_thumbnail_views() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        assert_eq!(app.asset_view, AssetView::List);
+        let texts = rendered_asset_panel(&mut app, &ctx);
+        assert!(texts.iter().any(|text| text == "Vista"));
+        assert!(texts.iter().any(|text| text == "Lista"));
+        assert!(texts.iter().any(|text| text == "Miniaturas"));
+
+        app.asset_view = AssetView::Grid;
+        app.assets.entries.clear();
+        app.assets.entries.push(AssetEntry {
+            path: "hero.png".to_owned(),
+            kind: AssetKind::Image,
+        });
+        app.assets.entries.push(AssetEntry {
+            path: "jump.wav".to_owned(),
+            kind: AssetKind::Audio,
+        });
+        let texts = rendered_asset_panel(&mut app, &ctx);
+        assert!(texts.iter().any(|text| text == "hero.png"));
+        assert!(texts.iter().any(|text| text == "jump.wav"));
     }
 }
