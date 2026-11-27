@@ -3,7 +3,10 @@
 #include <lunar_bridge/game.h>
 #include <lunar_bridge/src/lib.rs.h>
 
+#include "behaviors.hpp"
+
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -44,9 +47,17 @@ class PlatformerGame final : public Game {
         std::uint8_t shape_kind = 0;
     };
 
+    struct BehaviorVisual {
+        float dx = 0.0F;
+        float dy = 0.0F;
+        bool flip = false;
+    };
+
     bool is_grounded() const;
     void check_triggers(const BodyState &state);
     const Sprite *sprite_for(const std::string &asset) const;
+    void reload_scripts_if_changed();
+    void update_behaviors(float dt);
 
     Engine &engine_;
     std::vector<Entity> entities_;
@@ -61,4 +72,12 @@ class PlatformerGame final : public Game {
     float camera_x_ = 0.0F;
     bool facing_right_ = true;
     bool won_ = false;
+
+    std::string scripts_path_;
+    std::string diagnostics_path_;
+    std::filesystem::file_time_type scripts_stamp_{};
+    bool scripts_stamp_valid_ = false;
+    std::vector<lunar_behaviors::Binding> scripts_;
+    std::unordered_map<std::uint64_t, lunar_behaviors::Vec2> follow_state_;
+    std::unordered_map<std::uint64_t, BehaviorVisual> behavior_visuals_;
 };

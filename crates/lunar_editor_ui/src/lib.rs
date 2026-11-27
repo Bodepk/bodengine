@@ -23,6 +23,7 @@ mod layout;
 mod play;
 mod prefabs;
 mod recent;
+mod scripts;
 mod settings;
 mod shortcuts;
 mod status;

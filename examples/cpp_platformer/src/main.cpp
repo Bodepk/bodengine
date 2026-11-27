@@ -13,6 +13,13 @@ int main(int argc, char **argv) {
 #endif
 
     try {
+        if (argc > 1 && std::string(argv[1]) == "--self-test") {
+            const bool ok = lunar_behaviors::self_test();
+            std::cout << (ok ? "comportamientos C++ verificados\n"
+                             : "fallaron los comportamientos C++\n");
+            return ok ? 0 : 1;
+        }
+
         GameConfig config{"Lunar C++ platformer", 960, 540, rust::String(assets_dir)};
         auto engine = new_game_engine(config);
         PlatformerGame game(*engine, config);

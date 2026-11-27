@@ -59,6 +59,14 @@ jobs:
           else
             build/cpp_platformer/cpp_platformer --headless
           fi
+      - name: Run C++ behavior self-test (headless)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            build/cpp_platformer/Release/cpp_platformer.exe --self-test
+          else
+            build/cpp_platformer/cpp_platformer --self-test
+          fi
       - name: Configure and install C++ SDK
         shell: bash
         run: |

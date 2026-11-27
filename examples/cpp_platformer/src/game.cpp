@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
+#include <utility>
 
 namespace {
 
@@ -14,6 +17,7 @@ constexpr float kMoveImpulse = 0.28F;
 constexpr float kMaxSpeed = 5.0F;
 constexpr float kJumpImpulse = 6.2F;
 constexpr float kFixedDt = 1.0F / 60.0F;
+constexpr float kPi = 3.14159265358979323846F;
 constexpr std::uint8_t kDynamic = 1;
 constexpr std::uint8_t kFixed = 2;
 
@@ -54,7 +58,9 @@ bool starts_with(const std::string &value, const char *prefix) {
 
 PlatformerGame::PlatformerGame(Engine &engine, const GameConfig &config) : engine_(engine) {
     // `assets_dir` ya vive en el Engine creado con esta misma configuración.
-    (void)config;
+    const std::string assets = to_std(config.assets_dir);
+    scripts_path_ = assets + "/scripts.map.txt";
+    diagnostics_path_ = assets + "/scripts.diagnostics.txt";
     engine_.set_gravity(0.0F, -18.0F);
     if (!engine_.load_scene("platformer.scene.json")) {
         throw std::runtime_error("no se pudo cargar platformer.scene.json");
@@ -181,6 +187,92 @@ const PlatformerGame::Sprite *PlatformerGame::sprite_for(const std::string &asse
     return found == sprites_.end() ? nullptr : &found->second;
 }
 
+void PlatformerGame::reload_scripts_if_changed() {
+    std::error_code error;
+    const auto stamp = std::filesystem::last_write_time(scripts_path_, error);
+    if (error) {
+        if (scripts_stamp_valid_) {
+            scripts_stamp_valid_ = false;
+            scripts_.clear();
+            follow_state_.clear();
+            behavior_visuals_.clear();
+        }
+        return;
+    }
+    if (scripts_stamp_valid_ && stamp == scripts_stamp_) {
+        return;
+    }
+    scripts_stamp_ = stamp;
+    scripts_stamp_valid_ = true;
+
+    std::ifstream file(scripts_path_);
+    const std::string text((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    const lunar_behaviors::ParseResult parsed = lunar_behaviors::parse_map(text);
+    scripts_ = parsed.bindings;
+    follow_state_.clear();
+    behavior_visuals_.clear();
+
+    std::ofstream diagnostics(diagnostics_path_);
+    diagnostics << lunar_behaviors::encode_diagnostics(parsed.errors);
+}
+
+void PlatformerGame::update_behaviors(float dt) {
+    behavior_visuals_.clear();
+    if (scripts_.empty()) {
+        return;
+    }
+    const BodyState player = engine_.body_state(player_body_);
+    for (const lunar_behaviors::Binding &binding : scripts_) {
+        if (binding.entity == player_entity_) {
+            continue;
+        }
+        const auto found = std::find_if(
+            entities_.begin(), entities_.end(),
+            [&binding](const Entity &entity) { return entity.id == binding.entity; });
+        if (found == entities_.end()) {
+            continue;
+        }
+
+        BehaviorVisual visual;
+        if (binding.behavior == "Patrol") {
+            const float offset = lunar_behaviors::patrol_offset(
+                elapsed_, lunar_behaviors::number(binding, "speed", 1.0F),
+                lunar_behaviors::number(binding, "radius", 2.0F));
+            if (lunar_behaviors::axis_is(binding, "axis", 'y')) {
+                visual.dy = offset;
+            } else {
+                visual.dx = offset;
+            }
+        } else if (binding.behavior == "Bob") {
+            visual.dy = lunar_behaviors::bob_offset(
+                elapsed_, lunar_behaviors::number(binding, "speed", 1.0F),
+                lunar_behaviors::number(binding, "amplitude", 0.5F));
+        } else if (binding.behavior == "Spin") {
+            const float radians = lunar_behaviors::spin_angle_degrees(
+                                      elapsed_, lunar_behaviors::number(binding, "speed", 90.0F)) *
+                                  kPi / 180.0F;
+            visual.flip = std::cos(radians) < 0.0F;
+        } else if (binding.behavior == "Follow") {
+            const auto previous = follow_state_.find(binding.entity);
+            const lunar_behaviors::Vec2 current = previous == follow_state_.end()
+                                                      ? lunar_behaviors::Vec2{found->x, found->y}
+                                                      : previous->second;
+            const lunar_behaviors::Vec2 target{
+                player.valid ? player.x : found->x,
+                player.valid ? player.y : found->y,
+            };
+            const lunar_behaviors::Vec2 next = lunar_behaviors::follow_step(
+                current, target, lunar_behaviors::number(binding, "speed", 1.0F),
+                lunar_behaviors::number(binding, "radius", 0.5F), dt);
+            follow_state_[binding.entity] = next;
+            visual.dx = next.x - found->x;
+            visual.dy = next.y - found->y;
+        }
+        behavior_visuals_[binding.entity] = visual;
+    }
+}
+
 bool PlatformerGame::on_frame() {
     if (engine_.was_key_pressed(static_cast<std::uint32_t>(lunar::KeyCode::Escape))) {
         return false;
@@ -221,6 +313,8 @@ bool PlatformerGame::on_frame() {
         }
     }
     elapsed_ += kFixedDt * static_cast<float>(substeps);
+    reload_scripts_if_changed();
+    update_behaviors(kFixedDt * static_cast<float>(substeps));
 
     const BodyState state = engine_.body_state(player_body_);
     if (!state.valid) {
@@ -289,8 +383,11 @@ void PlatformerGame::on_render() {
         } else if (entity.asset == kApple) {
             frame = static_cast<std::uint32_t>(elapsed_ * 8.0F) % 17;
         }
-        const float x = is_player ? player.x : entity.x;
-        const float y = is_player ? player.y : entity.y;
+        const auto visual = behavior_visuals_.find(entity.id);
+        const bool has_visual = !is_player && visual != behavior_visuals_.end();
+        const float x = is_player ? player.x : entity.x + (has_visual ? visual->second.dx : 0.0F);
+        const float y = is_player ? player.y : entity.y + (has_visual ? visual->second.dy : 0.0F);
+        const bool flip = (is_player && !facing_right_) || (has_visual && visual->second.flip);
         const float world_width =
             sprite->frame_width / kPixelsPerUnit * entity.scale_x;
         const float world_height =
@@ -299,7 +396,7 @@ void PlatformerGame::on_render() {
         draws.push_back(SpriteDrawCpp{
             sprite->handle,
             frame,
-            is_player && !facing_right_,
+            flip,
             (x - camera_x_) / half_width,
             y / half_height,
             world_width / half_width,

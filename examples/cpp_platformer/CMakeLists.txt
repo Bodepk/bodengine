@@ -52,7 +52,7 @@ add_custom_target(lunar_bridge_rust ALL
 
 file(TO_CMAKE_PATH "${LUNAR_ROOT}/examples/sprite_platformer/assets" LUNAR_ASSETS_PATH)
 
-add_executable(cpp_platformer src/main.cpp src/game.cpp)
+add_executable(cpp_platformer src/main.cpp src/game.cpp src/behaviors.cpp)
 add_dependencies(cpp_platformer lunar_bridge_rust)
 target_include_directories(cpp_platformer PRIVATE
   "${LUNAR_BRIDGE_INCLUDE}"

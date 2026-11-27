@@ -184,6 +184,62 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
     });
 
     ui.separator();
+    ui.heading("Comportamiento");
+    let current = app.script_map.get(id).cloned();
+    let choice = current.as_ref().map_or_else(
+        || "Ninguno".to_owned(),
+        |binding| binding.behavior.name().to_owned(),
+    );
+    egui::ComboBox::from_label("Script")
+        .selected_text(&choice)
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_label(choice == "Ninguno", "Ninguno")
+                .clicked()
+            {
+                app.apply_script_binding(id, None);
+            }
+            for behavior in crate::scripts::Behavior::ALL {
+                let label = behavior.name();
+                if ui.selectable_label(choice == label, label).clicked() {
+                    app.apply_script_binding(id, Some(crate::scripts::Binding::new(behavior)));
+                }
+            }
+        });
+    if let Some(binding) = current {
+        let mut params = binding.params.clone();
+        let behavior = binding.behavior;
+        for (key, _, _) in behavior.schema() {
+            let Some(value) = params.get_mut(*key) else {
+                continue;
+            };
+            let response = ui.add(
+                egui::TextEdit::singleline(value)
+                    .desired_width(90.0)
+                    .hint_text(*key),
+            );
+            let enter =
+                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            if response.lost_focus() || enter {
+                let edited = value.clone();
+                if crate::scripts::valid_param(behavior, key, &edited) {
+                    let mut next = binding.clone();
+                    next.params.insert((*key).to_owned(), edited);
+                    app.apply_script_binding(id, Some(next));
+                } else {
+                    app.set_status(format!("Valor no válido para {key}: {edited}"));
+                }
+            }
+        }
+        ui.label(format!(
+            "Enlace de {} guardado en scripts.map.txt al guardar la escena",
+            behavior
+        ));
+    } else {
+        ui.label("Sin comportamiento: elige uno para enlazarlo a esta entidad.");
+    }
+
+    ui.separator();
     component_editor_ui(app, ui);
 }
 
@@ -231,6 +287,54 @@ mod tests {
             texts
                 .iter()
                 .any(|text| text.contains("2 entidades seleccionadas")),
+            "{texts:?}"
+        );
+    }
+
+    #[test]
+    fn inspector_shows_the_behavior_selector_and_its_parameters() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .unwrap();
+        app.apply_script_binding(
+            1,
+            Some(crate::scripts::Binding::new(
+                crate::scripts::Behavior::Patrol,
+            )),
+        );
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut second = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        second.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        output.textures_delta.clear();
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            texts.iter().any(|text| text == "Comportamiento"),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|text| text == "Patrol"), "{texts:?}");
+        assert!(
+            texts.iter().any(|text| text.contains("scripts.map.txt")),
             "{texts:?}"
         );
     }

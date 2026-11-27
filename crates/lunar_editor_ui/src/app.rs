@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use egui::{Context, Ui};
@@ -96,6 +96,13 @@ pub(crate) struct EditorApp {
     asset_options_path: Option<String>,
     /// Sondeo cooperativo de huellas en disco (E17, ADR-036).
     reimport: ReimportWatcher,
+    /// Enlaces declarativos del fichero lateral `scripts.map.txt` (E20).
+    pub(crate) script_map: crate::scripts::ScriptMap,
+    script_undo: Vec<crate::scripts::ScriptMap>,
+    script_redo: Vec<crate::scripts::ScriptMap>,
+    script_map_stamp: u64,
+    script_diag_stamp: u64,
+    script_last_poll: u64,
     pub(crate) view_mode: ViewMode,
     pub(crate) camera3d: Camera3D,
     pub(crate) view3d_drag: Drag3D,
@@ -151,7 +158,7 @@ impl EditorApp {
         let samples = crate::import_options::sample(&assets.root, &assets.entries);
         let _ = reimport.poll(&samples, 0, 0);
 
-        Self {
+        let mut app = Self {
             document,
             path,
             path_text: path_text.clone(),
@@ -190,6 +197,12 @@ impl EditorApp {
             asset_options: ImportOptions::default(),
             asset_options_path: None,
             reimport,
+            script_map: crate::scripts::ScriptMap::default(),
+            script_undo: Vec::new(),
+            script_redo: Vec::new(),
+            script_map_stamp: 0,
+            script_diag_stamp: 0,
+            script_last_poll: 0,
             view_mode: ViewMode::default(),
             camera3d: Camera3D::default(),
             view3d_drag: Drag3D::default(),
@@ -211,6 +224,89 @@ impl EditorApp {
             save_as_buffer: path_text.clone(),
             picker: None,
             recent: recent::load(),
+        };
+        app.load_scripts();
+        app
+    }
+
+    /// Ruta del fichero lateral de enlaces junto a la escena actual.
+    pub(crate) fn script_map_path(&self) -> PathBuf {
+        Self::sidecar_path(&self.path, crate::scripts::MAP_FILE)
+    }
+
+    fn script_diagnostics_path(&self) -> PathBuf {
+        Self::sidecar_path(&self.path, crate::scripts::DIAGNOSTICS_FILE)
+    }
+
+    fn sidecar_path(scene: &Path, name: &str) -> PathBuf {
+        scene.parent().unwrap_or_else(|| Path::new(".")).join(name)
+    }
+
+    /// Lee el mapa lateral y los diagnósticos del juego sin tocar la escena.
+    pub(crate) fn load_scripts(&mut self) {
+        let path = self.script_map_path();
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let (map, errors) = crate::scripts::ScriptMap::parse(&text);
+        self.script_map = map;
+        self.script_map_stamp = crate::import_options::stamp(&path);
+        self.script_undo.clear();
+        self.script_redo.clear();
+        for error in errors {
+            self.set_status_level(crate::status::Level::Error, error);
+        }
+        self.load_script_diagnostics();
+    }
+
+    fn load_script_diagnostics(&mut self) {
+        let path = self.script_diagnostics_path();
+        self.script_diag_stamp = crate::import_options::stamp(&path);
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        for error in crate::scripts::diagnostics(&text) {
+            self.set_status_level(crate::status::Level::Error, error);
+        }
+    }
+
+    /// Edita un enlace como un único paso de undo, apareado con un comando
+    /// atómico del documento para que la pila del editor siga alineada.
+    pub(crate) fn apply_script_binding(
+        &mut self,
+        id: u64,
+        binding: Option<crate::scripts::Binding>,
+    ) {
+        if !self.ensure_editable() || self.script_map.get(id) == binding.as_ref() {
+            return;
+        }
+        if self
+            .try_apply(EditorCommand::SetTransforms {
+                transforms: Vec::new(),
+            })
+            .is_err()
+        {
+            return;
+        }
+        self.script_map.set(id, binding);
+        self.script_map_stamp = crate::import_options::stamp(&self.script_map_path());
+        self.set_status(format!("Comportamiento actualizado para #{id}"));
+    }
+
+    /// Sondeo de diagnósticos y de cambios externos del fichero lateral.
+    pub(crate) fn tick_scripts(&mut self, now_ms: u64) {
+        const INTERVAL_MS: u64 = 750;
+        if now_ms < self.script_last_poll + INTERVAL_MS {
+            return;
+        }
+        self.script_last_poll = now_ms;
+        let diagnostics_path = self.script_diagnostics_path();
+        let stamp = crate::import_options::stamp(&diagnostics_path);
+        if stamp != self.script_diag_stamp {
+            self.script_diag_stamp = stamp;
+            self.load_script_diagnostics();
+        }
+        let map_path = self.script_map_path();
+        let stamp = crate::import_options::stamp(&map_path);
+        if stamp != 0 && stamp != self.script_map_stamp && !self.document.is_dirty() {
+            self.load_scripts();
+            self.set_status("Enlaces de scripts recargados desde disco");
         }
     }
 
@@ -261,6 +357,17 @@ impl EditorApp {
             Ok(()) => {
                 self.revision += 1;
                 self.set_status("");
+                let previous = self.script_map.clone();
+                self.script_undo.push(previous);
+                self.script_redo.clear();
+                let ids: Vec<u64> = self
+                    .document
+                    .scene()
+                    .entities
+                    .iter()
+                    .map(|entity| entity.id)
+                    .collect();
+                self.script_map.retain(&ids);
                 Ok(())
             }
             Err(error) => {
@@ -322,6 +429,10 @@ impl EditorApp {
             return;
         }
         if self.document.undo() {
+            if let Some(previous) = self.script_undo.pop() {
+                self.script_redo
+                    .push(std::mem::replace(&mut self.script_map, previous));
+            }
             self.revision += 1;
             self.set_status("");
         } else {
@@ -334,6 +445,10 @@ impl EditorApp {
             return;
         }
         if self.document.redo() {
+            if let Some(next) = self.script_redo.pop() {
+                self.script_undo
+                    .push(std::mem::replace(&mut self.script_map, next));
+            }
             self.revision += 1;
             self.set_status("");
         } else {
@@ -379,6 +494,7 @@ impl EditorApp {
                 self.preview.clear();
                 self.drag = CanvasDrag::None;
                 self.revision += 1;
+                self.load_scripts();
                 self.refresh_guids();
                 let (rewritten, broken) = self.rewrite_asset_paths();
                 let suffix = Self::describe_guid_changes(rewritten, &broken);
@@ -430,6 +546,18 @@ impl EditorApp {
         self.save_to(self.path.clone())
     }
 
+    /// Escribe el mapa lateral tras un guardado correcto de la escena.
+    fn write_scripts_for(&mut self, path: &Path) -> Result<(), String> {
+        let sidecar = Self::sidecar_path(path, crate::scripts::MAP_FILE);
+        match crate::scripts::atomic_write(&sidecar, &self.script_map.encode()) {
+            Ok(()) => {
+                self.script_map_stamp = crate::import_options::stamp(&sidecar);
+                Ok(())
+            }
+            Err(error) => Err(format!("No se pudo guardar {}: {error}", sidecar.display())),
+        }
+    }
+
     fn save_to(&mut self, path: PathBuf) -> bool {
         if !self.ensure_editable() {
             return false;
@@ -440,9 +568,17 @@ impl EditorApp {
         match self.document.save_to_path(&path) {
             Ok(()) => {
                 self.path = path.clone();
-                self.set_status(format!("Guardada {path:?}{suffix}"));
-                self.remember(path);
-                true
+                match self.write_scripts_for(&path) {
+                    Ok(()) => {
+                        self.set_status(format!("Guardada {path:?}{suffix}"));
+                        self.remember(path);
+                        true
+                    }
+                    Err(error) => {
+                        self.set_status_level(crate::status::Level::Error, error);
+                        false
+                    }
+                }
             }
             Err(error) => {
                 self.set_status(format!("No se pudo guardar {path:?}: {error}"));
@@ -467,6 +603,7 @@ impl EditorApp {
         match self.document.save_to_path(&target) {
             Ok(()) => {
                 self.path = target.clone();
+                self.write_scripts_for(&target)?;
                 self.remember(target.clone());
                 Ok(format!("Guardada {target:?}{suffix}"))
             }
@@ -493,6 +630,7 @@ impl EditorApp {
                 self.preview.clear();
                 self.drag = CanvasDrag::None;
                 self.revision += 1;
+                self.load_scripts();
                 self.refresh_guids();
                 let (rewritten, broken) = self.rewrite_asset_paths();
                 let suffix = Self::describe_guid_changes(rewritten, &broken);
@@ -535,6 +673,11 @@ impl EditorApp {
 
     pub(crate) fn new_document(&mut self) {
         self.document = EditorDocument::new();
+        self.script_map = crate::scripts::ScriptMap::default();
+        self.script_undo.clear();
+        self.script_redo.clear();
+        self.script_map_stamp = 0;
+        self.script_diag_stamp = 0;
         self.selection_anchor = None;
         self.preview.clear();
         self.drag = CanvasDrag::None;
@@ -1187,6 +1330,7 @@ impl eframe::App for EditorApp {
         let now_ms = (ctx.input(|input| input.time) * 1000.0) as u64;
         self.tick_play(dt);
         self.tick_reimport(&ctx, now_ms);
+        self.tick_scripts(now_ms);
         self.handle_shortcuts(&ctx);
         self.sync_inspector();
 
@@ -2060,6 +2204,69 @@ mod tests {
         app.tick_reimport(&ctx, 0);
 
         assert!(app.status.contains("desaparecido(s)"), "{}", app.status);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn script_bindings_survive_save_load_and_one_undo_step() {
+        let ctx = Context::default();
+        let root = std::env::temp_dir().join(format!("lunar_scripts_app_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        let scene = root.join("escena.json");
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = EditorDocument::new();
+        app.document
+            .apply(EditorCommand::CreateEntity {
+                id: 4,
+                name: Some("caja".to_owned()),
+            })
+            .unwrap();
+        let mut binding = crate::scripts::Binding::new(crate::scripts::Behavior::Patrol);
+        binding.params.insert("speed".to_owned(), "3.5".to_owned());
+        app.apply_script_binding(4, Some(binding.clone()));
+
+        app.console_save(Some(&scene.to_string_lossy()))
+            .expect("save scene and script map");
+        assert!(app.script_map_path().exists());
+        let text = std::fs::read_to_string(app.script_map_path()).unwrap();
+        assert!(text.contains("4=Patrol"), "{text}");
+        assert!(text.contains("speed=3.5"), "{text}");
+
+        let loaded = EditorApp::new(Some(scene.clone()), &ctx);
+        assert_eq!(loaded.script_map.get(4), Some(&binding));
+
+        app.undo();
+        assert!(app.script_map.get(4).is_none());
+        app.redo();
+        assert_eq!(app.script_map.get(4), Some(&binding));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn script_diagnostics_reach_the_console_without_touching_the_scene() {
+        let ctx = Context::default();
+        let root = std::env::temp_dir().join(format!("lunar_scripts_diag_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        let scene = root.join("escena.json");
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = EditorDocument::new();
+        app.path = scene;
+        let diagnostics = app.script_diagnostics_path();
+        std::fs::write(&diagnostics, "línea 2: speed no válido\n").unwrap();
+        let before = app.document.scene().clone();
+
+        app.tick_scripts(5_000);
+
+        assert_eq!(app.document.scene(), &before);
+        assert!(app.status_log.iter().any(|entry| {
+            entry.level == crate::status::Level::Error && entry.message.contains("speed no válido")
+        }));
+        std::fs::write(&diagnostics, "").unwrap();
+        app.tick_scripts(10_000);
+        assert_eq!(
+            app.script_diag_stamp,
+            crate::import_options::stamp(&diagnostics)
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
