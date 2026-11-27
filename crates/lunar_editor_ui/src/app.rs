@@ -81,6 +81,8 @@ pub(crate) struct EditorApp {
     pub(crate) console_history_index: Option<usize>,
     pub(crate) console_draft: String,
     pub(crate) show_log: bool,
+    /// Ventana de historial de comandos (E45); no se persiste.
+    pub(crate) show_history: bool,
     /// Ventana de timeline y su reloj de vista previa (E42); no se persiste.
     pub(crate) show_timeline: bool,
     pub(crate) timeline_state: crate::timeline::TimelineState,
@@ -190,6 +192,7 @@ impl EditorApp {
             console_history_index: None,
             console_draft: String::new(),
             show_log: false,
+            show_history: false,
             show_timeline: false,
             timeline_state: crate::timeline::TimelineState::default(),
             start_time,
@@ -467,6 +470,29 @@ impl EditorApp {
             self.set_status("");
         } else {
             self.set_status("Nada para rehacer");
+        }
+    }
+
+    /// Deshace hasta dejar `remaining` operaciones, con el mismo efecto sobre
+    /// `scripts.map.txt` que una sucesión de `undo` (E45).
+    pub(crate) fn undo_to(&mut self, remaining: usize) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let target = remaining.min(self.document.undo_len());
+        while self.document.undo_len() > target {
+            self.undo();
+        }
+    }
+
+    /// Rehace hasta dejar `remaining` operaciones pendientes (E45).
+    pub(crate) fn redo_to(&mut self, remaining: usize) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let target = remaining.min(self.document.redo_len());
+        while self.document.redo_len() > target {
+            self.redo();
         }
     }
 
@@ -1461,6 +1487,13 @@ impl eframe::App for EditorApp {
         });
         crate::dialogs::show(self, &ctx);
         crate::status::log_window(self, &ctx);
+        let mut history_open = self.show_history;
+        if history_open {
+            egui::Window::new("Historial")
+                .open(&mut history_open)
+                .show(&ctx, |ui| crate::history::history_ui(self, ui));
+            self.show_history = history_open;
+        }
         let mut timeline_open = self.show_timeline;
         if timeline_open {
             egui::Window::new("Timeline de animación")
@@ -1866,6 +1899,33 @@ mod tests {
         assert!(app.document.selection().is_empty());
         app.select_clicked(5, true, true);
         assert_eq!(app.document.selection(), &[5]);
+    }
+
+    #[test]
+    fn history_jumps_repeat_normal_undo_and_redo_steps() {
+        let mut app = fresh_app();
+        app.apply(EditorCommand::CreateEntity { id: 1, name: None });
+        app.apply_script_binding(
+            1,
+            Some(crate::scripts::Binding::new(
+                crate::scripts::Behavior::Patrol,
+            )),
+        );
+        let history = app.document.undo_len();
+        assert_eq!(history, app.script_undo.len());
+        assert!(app.script_map.get(1).is_some());
+
+        app.undo_to(history - 1);
+
+        assert_eq!(app.document.undo_len(), history - 1);
+        assert_eq!(app.script_undo.len(), history - 1);
+        assert!(app.script_map.get(1).is_none());
+
+        app.redo_to(0);
+
+        assert_eq!(app.document.undo_len(), history);
+        assert_eq!(app.script_undo.len(), history);
+        assert!(app.script_map.get(1).is_some());
     }
 
     #[test]

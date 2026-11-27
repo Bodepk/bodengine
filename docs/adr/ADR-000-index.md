@@ -61,6 +61,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [042](ADR-042-timeline-animaciones.md) | Timeline de animaciones en el editor | Aceptada |
 | [043](ADR-043-propagar-prefabs.md) | Propagar cambios de prefab a instancias | Aceptada |
 | [044](ADR-044-persistencia-vistas-editor.md) | Persistencia del sombreado 3D y de la vista de assets | Aceptada |
+| [045](ADR-045-historial-editor.md) | Historial de undo/redo con etiquetas | Aceptada |
 
 ## Consecuencias
 

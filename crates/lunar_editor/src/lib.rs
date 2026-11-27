@@ -110,6 +110,34 @@ pub enum EditorCommand {
     },
 }
 
+impl EditorCommand {
+    /// Etiqueta estable del comando para el historial de la GUI (ADR-045).
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::CreateEntity { .. } => "Crear entidad",
+            Self::DeleteEntity { .. } => "Borrar entidad",
+            Self::DeleteEntities { .. } => "Borrar entidades",
+            Self::RenameEntity { .. } => "Renombrar entidad",
+            Self::SetParent { .. } => "Cambiar padre",
+            Self::SetTransform { .. } => "Cambiar transformación",
+            Self::AddComponent { .. } => "Añadir componente",
+            Self::SetComponent { .. } => "Editar componente",
+            Self::SetComponents { .. } => "Editar componentes",
+            Self::RemoveComponent { .. } => "Quitar componente",
+            Self::MoveEntity { .. } => "Reordenar entidad",
+            Self::DuplicateEntity { .. } => "Duplicar entidad",
+            Self::DuplicateEntities { .. } => "Duplicar selección",
+            Self::PasteEntities { .. } => "Pegar entidades",
+            Self::SavePrefab { .. } => "Guardar plantilla",
+            Self::DeletePrefab { .. } => "Borrar plantilla",
+            Self::SetTransforms { .. } => "Mover entidades",
+            Self::ApplyPrefab { .. } => "Propagar plantilla",
+            Self::UpdatePrefab { .. } => "Actualizar plantilla",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct Snapshot {
     scene: Scene,
@@ -141,6 +169,9 @@ pub struct EditorDocument {
     dirty: bool,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
+    /// Etiquetas paralelas a `undo` / `redo` (ADR-045).
+    undo_labels: Vec<String>,
+    redo_labels: Vec<String>,
 }
 
 impl Default for EditorDocument {
@@ -151,6 +182,8 @@ impl Default for EditorDocument {
             dirty: false,
             undo: Vec::new(),
             redo: Vec::new(),
+            undo_labels: Vec::new(),
+            redo_labels: Vec::new(),
         }
     }
 }
@@ -229,6 +262,24 @@ impl EditorDocument {
         self.undo.len()
     }
 
+    /// Número de operaciones pendientes de rehacer.
+    #[must_use]
+    pub fn redo_len(&self) -> usize {
+        self.redo.len()
+    }
+
+    /// Etiquetas de las operaciones pendientes de deshacer, de antigua a reciente.
+    #[must_use]
+    pub fn undo_labels(&self) -> &[String] {
+        &self.undo_labels
+    }
+
+    /// Etiquetas de las operaciones deshechas, de antigua a la próxima a rehacer.
+    #[must_use]
+    pub fn redo_labels(&self) -> &[String] {
+        &self.redo_labels
+    }
+
     /// Valida, aplica y registra un comando. Un comando inválido no cambia nada.
     pub fn apply(&mut self, command: EditorCommand) -> Result<(), EditorError> {
         let mut next = self.scene.clone();
@@ -242,7 +293,9 @@ impl EditorDocument {
         self.selection = next_selection;
         self.dirty = true;
         self.undo.push(before);
+        self.undo_labels.push(command.label().to_owned());
         self.redo.clear();
+        self.redo_labels.clear();
         Ok(())
     }
 
@@ -251,7 +304,9 @@ impl EditorDocument {
         let Some(previous) = self.undo.pop() else {
             return false;
         };
+        let label = self.undo_labels.pop().unwrap_or_default();
         self.redo.push(Snapshot::from_document(self));
+        self.redo_labels.push(label);
         previous.restore_into(self);
         self.dirty = true;
         true
@@ -262,9 +317,33 @@ impl EditorDocument {
         let Some(next) = self.redo.pop() else {
             return false;
         };
+        let label = self.redo_labels.pop().unwrap_or_default();
         self.undo.push(Snapshot::from_document(self));
+        self.undo_labels.push(label);
         next.restore_into(self);
         self.dirty = true;
+        true
+    }
+
+    /// Deshace hasta dejar `remaining` operaciones en la pila de deshacer.
+    pub fn undo_to(&mut self, remaining: usize) -> bool {
+        let target = remaining.min(self.undo.len());
+        while self.undo.len() > target {
+            if !self.undo() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Rehace hasta dejar `remaining` operaciones en la pila de rehacer.
+    pub fn redo_to(&mut self, remaining: usize) -> bool {
+        let target = remaining.min(self.redo.len());
+        while self.redo.len() > target {
+            if !self.redo() {
+                return false;
+            }
+        }
         true
     }
 }
@@ -1344,6 +1423,46 @@ mod tests {
         );
         assert_eq!(document.scene(), &before);
         assert_eq!(document.undo_len(), history);
+    }
+
+    #[test]
+    fn history_labels_track_undo_redo_and_jumps() {
+        let mut document = EditorDocument::new();
+        assert!(document.undo_labels().is_empty());
+        document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create");
+        document
+            .apply(EditorCommand::RenameEntity {
+                id: 1,
+                name: Some("hero".to_owned()),
+            })
+            .expect("rename");
+        assert_eq!(
+            document.undo_labels(),
+            &["Crear entidad".to_owned(), "Renombrar entidad".to_owned()]
+        );
+
+        assert!(document.undo_to(0));
+        assert_eq!(document.redo_len(), 2);
+        assert!(document.undo_labels().is_empty());
+        assert_eq!(
+            document.redo_labels(),
+            &["Renombrar entidad".to_owned(), "Crear entidad".to_owned()]
+        );
+
+        assert!(document.redo_to(1));
+        assert_eq!(document.undo_labels(), &["Crear entidad".to_owned()]);
+        assert_eq!(document.redo_labels(), &["Renombrar entidad".to_owned()]);
+
+        document
+            .apply(EditorCommand::DeleteEntity { id: 1 })
+            .expect("delete");
+        assert_eq!(
+            document.undo_labels(),
+            &["Crear entidad".to_owned(), "Borrar entidad".to_owned()]
+        );
+        assert!(document.redo_labels().is_empty());
     }
 
     #[test]

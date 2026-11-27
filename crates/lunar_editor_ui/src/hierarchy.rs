@@ -61,6 +61,9 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
         if ui.button("Duplicar (Ctrl+D)").clicked() {
             app.duplicate_selected();
         }
+        if ui.button("Historial").clicked() {
+            app.show_history = !app.show_history;
+        }
         ui.separator();
         ui.label(format!(
             "{} entidad(es)",
