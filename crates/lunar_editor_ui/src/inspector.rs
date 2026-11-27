@@ -9,6 +9,7 @@ use crate::helpers::{
     prefab_component, quaternion_from_degrees, snap_degrees, snap_scale, snap_to_grid,
     sprite_component,
 };
+use crate::lights::Light;
 
 /// Cuantiza los buffers del inspector con las reglas de ADR-041.
 pub(crate) fn snap_transform_buffers(app: &mut EditorApp) {
@@ -175,6 +176,30 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
         }
     } else {
         ui.label("Sin material asignado");
+    }
+
+    ui.separator();
+    ui.heading("Luz (ADR-050)");
+    let current_light = app.light_map.get(id).copied();
+    match current_light {
+        Some(light) => {
+            let mut next = light;
+            if next.editor_ui(ui) {
+                app.commit_light(id, Some(next));
+            }
+            if ui.button("Quitar luz").clicked() {
+                app.commit_light(id, None);
+            }
+        }
+        None => {
+            if ui.button("Añadir luz").clicked() {
+                app.commit_light(id, Some(Light::default()));
+            }
+            ui.colored_label(
+                egui::Color32::from_gray(150),
+                "Sin luz: se usa la direccional fija",
+            );
+        }
     }
 
     ui.separator();
@@ -438,6 +463,51 @@ mod tests {
             (rect.width() - crate::materials::PREVIEW_SIZE).abs() < 0.01
                 && (rect.height() - crate::materials::PREVIEW_SIZE).abs() < 0.01
         }));
+    }
+
+    #[test]
+    fn inspector_exposes_the_editor_light_controls() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root =
+            std::env::temp_dir().join(format!("lunar_inspector_light_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.path = root.join("scene.json");
+        app.document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create entity");
+        app.commit_light(1, Some(Light::default()));
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut second = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        second.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        output.textures_delta.clear();
+        assert!(
+            texts.iter().any(|text| text == "Luz (ADR-050)"),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|text| text == "Direccional"), "{texts:?}");
+        assert!(texts.iter().any(|text| text == "Quitar luz"), "{texts:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

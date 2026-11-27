@@ -112,6 +112,8 @@ pub enum EditorCommand {
     /// la escena: existe solo para que el historial y el undo cubran también
     /// los ficheros que viven fuera del JSON v2.
     MaterialEdit,
+    /// Marca un cambio en el sidecar de luces del editor (E49). No toca la escena.
+    LightEdit,
 }
 
 impl EditorCommand {
@@ -139,6 +141,7 @@ impl EditorCommand {
             Self::ApplyPrefab { .. } => "Propagar plantilla",
             Self::UpdatePrefab { .. } => "Actualizar plantilla",
             Self::MaterialEdit => "Editar material",
+            Self::LightEdit => "Editar luz",
         }
     }
 }
@@ -601,6 +604,7 @@ fn mutate(
             prefab.entities = entities.clone();
         }
         EditorCommand::MaterialEdit => {}
+        EditorCommand::LightEdit => {}
     }
     Ok(())
 }
@@ -669,6 +673,26 @@ mod tests {
             .apply(EditorCommand::MaterialEdit)
             .expect("material edit");
         assert_eq!(EditorCommand::MaterialEdit.label(), "Editar material");
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), 1);
+        assert!(document.is_dirty());
+
+        assert!(document.undo());
+        assert_eq!(document.undo_len(), 0);
+        assert_eq!(document.redo_len(), 1);
+        assert!(document.redo());
+        assert_eq!(document.scene(), &before);
+    }
+
+    #[test]
+    fn light_edit_marks_history_without_touching_the_scene() {
+        let mut document = EditorDocument::new();
+        let before = document.scene().clone();
+
+        document
+            .apply(EditorCommand::LightEdit)
+            .expect("light edit");
+        assert_eq!(EditorCommand::LightEdit.label(), "Editar luz");
         assert_eq!(document.scene(), &before);
         assert_eq!(document.undo_len(), 1);
         assert!(document.is_dirty());

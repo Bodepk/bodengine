@@ -15,6 +15,7 @@ use crate::helpers::{
 };
 use crate::import_options::{ImportOptions, ReimportWatcher};
 use crate::layout;
+use crate::lights::{Light, LightMap, MAP_FILE as LIGHT_MAP_FILE};
 use crate::materials::{MAP_FILE as MATERIAL_MAP_FILE, Material, MaterialLibrary, MaterialMap};
 use crate::play::{PlayState, dynamic_ids, floor_y, step_vertical};
 use crate::recent;
@@ -126,6 +127,11 @@ pub(crate) struct EditorApp {
     material_redo: Vec<MaterialSnapshot>,
     material_map_stamp: u64,
     pub(crate) material_name_buffer: String,
+    /// Luces editor-owned por entidad y su historial paralelo (E49, ADR-050).
+    pub(crate) light_map: LightMap,
+    light_undo: Vec<LightMap>,
+    light_redo: Vec<LightMap>,
+    light_map_stamp: u64,
     pub(crate) view_mode: ViewMode,
     /// Relleno de la vista 3D (ADR-037); no se persiste, como la cámara.
     pub(crate) shading_mode: crate::view3d::ShadingMode,
@@ -239,6 +245,10 @@ impl EditorApp {
             material_redo: Vec::new(),
             material_map_stamp: 0,
             material_name_buffer: String::new(),
+            light_map: LightMap::default(),
+            light_undo: Vec::new(),
+            light_redo: Vec::new(),
+            light_map_stamp: 0,
             view_mode: ViewMode::default(),
             shading_mode: settings.shading_mode,
             camera3d: Camera3D::default(),
@@ -264,6 +274,7 @@ impl EditorApp {
         };
         app.load_scripts();
         app.load_materials();
+        app.load_lights();
         app
     }
 
@@ -472,6 +483,74 @@ impl EditorApp {
         self.set_status(format!("Creado {path}"));
     }
 
+    /// Ruta del fichero lateral de luces junto a la escena actual.
+    pub(crate) fn light_map_path(&self) -> PathBuf {
+        Self::sidecar_path(&self.path, LIGHT_MAP_FILE)
+    }
+
+    /// Lee luces y asignaciones sin mutar la escena (E49, ADR-050).
+    pub(crate) fn load_lights(&mut self) {
+        self.light_map = crate::lights::load(self.path.parent().unwrap_or_else(|| Path::new(".")));
+        let ids: Vec<u64> = self
+            .document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        self.light_map.retain(&ids);
+        self.light_map_stamp = crate::import_options::stamp(&self.light_map_path());
+        self.light_undo.clear();
+        self.light_redo.clear();
+    }
+
+    fn write_lights_for(&mut self, path: &Path) -> Result<(), String> {
+        let sidecar = Self::sidecar_path(path, LIGHT_MAP_FILE);
+        match crate::scripts::atomic_write(&sidecar, &self.light_map.encode()) {
+            Ok(()) => {
+                self.light_map_stamp = crate::import_options::stamp(&sidecar);
+                Ok(())
+            }
+            Err(error) => Err(format!("No se pudo guardar {}: {error}", sidecar.display())),
+        }
+    }
+
+    fn restore_lights(&mut self, snapshot: LightMap) {
+        self.light_map = snapshot;
+        if let Err(error) = self.write_lights_for(&self.path.clone()) {
+            self.set_status_level(crate::status::Level::Error, error);
+        }
+    }
+
+    /// Crea, edita o retira la luz de una entidad con undo/redo (ADR-050).
+    pub(crate) fn commit_light(&mut self, id: u64, light: Option<Light>) {
+        if !self.ensure_editable() {
+            return;
+        }
+        if self.light_map.get(id) == light.as_ref() {
+            return;
+        }
+        let previous = self.light_map.clone();
+        if self.try_apply(EditorCommand::LightEdit).is_err() {
+            return;
+        }
+        self.light_undo.push(previous);
+        self.light_redo.clear();
+        match light {
+            Some(light) => self.light_map.set(id, light),
+            None => self.light_map.remove(id),
+        }
+        if let Err(error) = self.write_lights_for(&self.path.clone()) {
+            self.set_status_level(crate::status::Level::Error, error);
+            return;
+        }
+        self.set_status(if light.is_some() {
+            format!("Luz guardada para #{id}")
+        } else {
+            format!("Luz retirada de #{id}")
+        });
+    }
+
     fn load_script_diagnostics(&mut self) {
         let path = self.script_diagnostics_path();
         self.script_diag_stamp = crate::import_options::stamp(&path);
@@ -539,6 +618,12 @@ impl EditorApp {
             self.load_scripts();
             self.set_status("Enlaces de scripts recargados desde disco");
         }
+        let light_path = self.light_map_path();
+        let stamp = crate::import_options::stamp(&light_path);
+        if stamp != 0 && stamp != self.light_map_stamp && !self.document.is_dirty() {
+            self.load_lights();
+            self.set_status("Luces recargadas desde disco");
+        }
     }
 
     /// Actualiza la barra de estado y registra el mensaje en el historial.
@@ -600,6 +685,7 @@ impl EditorApp {
                     .collect();
                 self.script_map.retain(&ids);
                 self.material_map.retain(&ids);
+                self.light_map.retain(&ids);
                 Ok(())
             }
             Err(error) => {
@@ -676,6 +762,11 @@ impl EditorApp {
                 self.material_redo.push(current);
                 self.restore_materials(previous);
             }
+            if let Some(previous) = self.light_undo.pop() {
+                let current = self.light_map.clone();
+                self.light_redo.push(current);
+                self.restore_lights(previous);
+            }
             self.revision += 1;
             self.set_status("");
         } else {
@@ -696,6 +787,11 @@ impl EditorApp {
                 let current = self.material_snapshot();
                 self.material_undo.push(current);
                 self.restore_materials(next);
+            }
+            if let Some(next) = self.light_redo.pop() {
+                let current = self.light_map.clone();
+                self.light_undo.push(current);
+                self.restore_lights(next);
             }
             self.revision += 1;
             self.set_status("");
@@ -767,6 +863,7 @@ impl EditorApp {
                 self.revision += 1;
                 self.load_scripts();
                 self.load_materials();
+                self.load_lights();
                 self.refresh_guids();
                 let (rewritten, broken) = self.rewrite_asset_paths();
                 let suffix = Self::describe_guid_changes(rewritten, &broken);
@@ -843,6 +940,7 @@ impl EditorApp {
                 match self
                     .write_scripts_for(&path)
                     .and_then(|()| self.write_materials_for(&path))
+                    .and_then(|()| self.write_lights_for(&path))
                 {
                     Ok(()) => {
                         self.set_status(format!("Guardada {path:?}{suffix}"));
@@ -880,6 +978,7 @@ impl EditorApp {
                 self.path = target.clone();
                 self.write_scripts_for(&target)?;
                 self.write_materials_for(&target)?;
+                self.write_lights_for(&target)?;
                 self.remember(target.clone());
                 Ok(format!("Guardada {target:?}{suffix}"))
             }
@@ -908,6 +1007,7 @@ impl EditorApp {
                 self.revision += 1;
                 self.load_scripts();
                 self.load_materials();
+                self.load_lights();
                 self.refresh_guids();
                 let (rewritten, broken) = self.rewrite_asset_paths();
                 let suffix = Self::describe_guid_changes(rewritten, &broken);
@@ -1434,6 +1534,9 @@ impl EditorApp {
         if let Some(component) = component {
             self.apply(EditorCommand::AddComponent { id, component });
         }
+        if template == EntityTemplate::Light3D {
+            self.commit_light(id, Some(Light::default()));
+        }
         self.set_status(format!("Creada {} (#{id})", template.label()));
     }
 
@@ -1814,6 +1917,53 @@ mod tests {
 
         app.redo();
         assert_eq!(app.material_map.get(1), Some("m.material.json"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn light_edits_are_undoable_and_written_to_sidecar() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_light_app_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.path = root.join("scene.json");
+        app.document = EditorDocument::new();
+        app.apply(EditorCommand::CreateEntity { id: 1, name: None });
+        let history = app.document.undo_len();
+
+        app.commit_light(1, Some(Light::default()));
+        assert_eq!(app.light_map.get(1), Some(&Light::default()));
+        assert_eq!(app.document.undo_len(), history + 1);
+        let sidecar = std::fs::read_to_string(app.light_map_path()).expect("sidecar");
+        assert!(sidecar.contains("1=d:"), "{sidecar}");
+
+        app.undo();
+        assert_eq!(app.light_map.get(1), None);
+        let sidecar = std::fs::read_to_string(app.light_map_path()).expect("sidecar");
+        assert!(!sidecar.contains("1="), "{sidecar}");
+
+        app.redo();
+        assert_eq!(app.light_map.get(1), Some(&Light::default()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn light_template_creates_a_default_light() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_light_tpl_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.path = root.join("scene.json");
+        app.document = EditorDocument::new();
+
+        app.create_from_template(EntityTemplate::Light3D);
+
+        assert_eq!(app.document.scene().entities.len(), 1);
+        assert_eq!(
+            app.document.scene().entities[0].name.as_deref(),
+            Some("Luz 3D 1")
+        );
+        assert!(app.light_map.get(1).is_some());
         let _ = std::fs::remove_dir_all(&root);
     }
 

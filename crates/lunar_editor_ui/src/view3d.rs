@@ -10,6 +10,7 @@ use crate::app::EditorApp;
 use crate::assets::AssetKind;
 use crate::dnd::AssetDrag;
 use crate::gizmo::{Originals, group_pivot, space_axes, translate_group};
+use crate::lights::{AMBIENT, Light, LightKind};
 use crate::play::PlayState;
 use crate::tools::{TransformMode, TransformSpace};
 
@@ -299,28 +300,107 @@ pub(crate) fn shade_factor(normal: [f32; 3]) -> f32 {
     (0.35 + 0.65 * diffuse).clamp(0.0, 1.0)
 }
 
-/// Aplica el factor de sombreado a un color sin alterar su alfa.
-#[must_use]
-pub(crate) fn shade_color(base: Color32, factor: f32) -> Color32 {
-    let factor = factor.clamp(0.0, 1.0);
-    let channel = |value: u8| (f32::from(value) * factor).round() as u8;
+/// Aplica un factor RGB por canal sin alterar el alfa.
+fn shade_color_rgb(base: Color32, tint: [f32; 3]) -> Color32 {
+    let channel =
+        |value: u8, factor: f32| (f32::from(value) * factor.clamp(0.0, 1.0)).round() as u8;
     Color32::from_rgba_premultiplied(
-        channel(base.r()),
-        channel(base.g()),
-        channel(base.b()),
+        channel(base.r(), tint[0]),
+        channel(base.g(), tint[1]),
+        channel(base.b(), tint[2]),
         base.a(),
     )
 }
 
-/// Caras visibles de una caja, ordenadas de lejos a cerca (ADR-037).
+/// Luz resuelta para sombrear: posición leída de la entidad marcadora (ADR-050).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LightSample {
+    pub(crate) kind: LightKind,
+    pub(crate) color: [f32; 3],
+    pub(crate) intensity: f32,
+    pub(crate) direction: [f32; 3],
+    pub(crate) position: [f32; 3],
+    pub(crate) range: f32,
+}
+
+/// Resuelve las luces del editor, incluida la posición de las puntuales.
 #[must_use]
-pub(crate) fn shaded_faces(
+pub(crate) fn light_samples(app: &EditorApp) -> Vec<LightSample> {
+    app.light_map
+        .iter()
+        .map(|(id, light)| LightSample {
+            kind: light.kind,
+            color: light.color,
+            intensity: light.intensity,
+            direction: light.direction,
+            position: app
+                .document
+                .scene()
+                .entities
+                .iter()
+                .find(|entity| entity.id == id)
+                .map(|entity| displayed_transform(app, entity).translation)
+                .unwrap_or_default(),
+            range: light.range,
+        })
+        .collect()
+}
+
+/// Respuesta RGB de las luces para una normal y un centro. Sin luces se
+/// conserva la direccional fija de ADR-037/049 (ADR-050).
+#[must_use]
+pub(crate) fn light_response(
+    samples: &[LightSample],
+    center: [f32; 3],
+    normal: [f32; 3],
+) -> [f32; 3] {
+    if samples.is_empty() {
+        return [shade_factor(normal); 3];
+    }
+    let normal = normalize(normal);
+    let mut out = [AMBIENT; 3];
+    for sample in samples {
+        let (direction, attenuation) = match sample.kind {
+            LightKind::Directional => (normalize(sample.direction), 1.0),
+            LightKind::Point => {
+                let delta = sub(sample.position, center);
+                let distance = dot(delta, delta).sqrt();
+                if sample.range <= 0.0 || distance >= sample.range {
+                    continue;
+                }
+                (
+                    normalize(delta),
+                    (1.0 - distance / sample.range).clamp(0.0, 1.0),
+                )
+            }
+        };
+        let diffuse = dot(normal, direction).max(0.0);
+        let amount = diffuse * attenuation * sample.intensity.clamp(0.0, 2.0);
+        for channel in 0..3 {
+            out[channel] += amount * sample.color[channel].clamp(0.0, 1.0);
+        }
+    }
+    out.map(|value| {
+        if value.is_finite() {
+            value.clamp(0.0, 1.0)
+        } else {
+            AMBIENT
+        }
+    })
+}
+
+/// Caras de la caja ordenadas de lejos a cerca, con un factor RGB por normal.
+fn faces_with<F>(
     transform: Transform,
     camera: Camera3D,
     rect: Rect,
     base: Color32,
     mode: ShadingMode,
-) -> Vec<FaceDraw> {
+    tint: F,
+) -> Vec<FaceDraw>
+where
+    F: Fn([f32; 3]) -> [f32; 3],
+{
     if !mode.fills() {
         return Vec::new();
     }
@@ -342,18 +422,48 @@ pub(crate) fn shaded_faces(
             continue;
         }
         let factor = if mode.lit() {
-            shade_factor(rotate(local_normal, transform.rotation))
+            tint(rotate(local_normal, transform.rotation))
         } else {
-            1.0
+            [1.0; 3]
         };
         faces.push(FaceDraw {
             points: [a, b, c, d],
-            color: shade_color(base, factor),
+            color: shade_color_rgb(base, factor),
             depth,
         });
     }
     faces.sort_by(|left, right| right.depth.total_cmp(&left.depth));
     faces
+}
+
+/// Caras con la luz fija de ADR-037: fallback y comparación de tests.
+#[must_use]
+pub(crate) fn shaded_faces(
+    transform: Transform,
+    camera: Camera3D,
+    rect: Rect,
+    base: Color32,
+    mode: ShadingMode,
+) -> Vec<FaceDraw> {
+    faces_with(transform, camera, rect, base, mode, |normal| {
+        [shade_factor(normal); 3]
+    })
+}
+
+/// Caras con las luces del editor (ADR-050).
+fn lit_faces(
+    app: &EditorApp,
+    entity: &SceneEntity,
+    camera: Camera3D,
+    rect: Rect,
+    base: Color32,
+    samples: &[LightSample],
+) -> Vec<FaceDraw> {
+    let transform = displayed_transform(app, entity);
+    let center = transform.translation;
+    faces_with(transform, camera, rect, base, ShadingMode::Lit, |normal| {
+        light_response(samples, center, normal)
+    })
 }
 
 /// Color del material asignado a una entidad, si está cargado (ADR-049).
@@ -568,8 +678,20 @@ fn paint_axes(ui: &mut Ui, rect: Rect, camera: Camera3D) {
     }
 }
 
+/// Color de la cruz de un marcador: el de su luz cuando tiene una (ADR-050).
+fn marker_color(app: &EditorApp, entity: &SceneEntity, selected: bool) -> Color32 {
+    app.light_map
+        .get(entity.id)
+        .map_or_else(|| color_for(entity, selected), Light::preview_color)
+}
+
 fn paint_entities(app: &EditorApp, ui: &mut Ui, rect: Rect, camera: Camera3D) {
     if app.shading_mode.fills() {
+        let samples = if app.shading_mode.lit() {
+            light_samples(app)
+        } else {
+            Vec::new()
+        };
         let mut faces = Vec::new();
         for entity in &app.document.scene().entities {
             if is_marker(entity) {
@@ -577,13 +699,18 @@ fn paint_entities(app: &EditorApp, ui: &mut Ui, rect: Rect, camera: Camera3D) {
             }
             let transform = displayed_transform(app, entity);
             let selected = app.document.selection().contains(&entity.id);
-            faces.extend(shaded_faces(
-                transform,
-                camera,
-                rect,
-                fill_color(app, entity, selected),
-                app.shading_mode,
-            ));
+            let base = fill_color(app, entity, selected);
+            if app.shading_mode.lit() {
+                faces.extend(lit_faces(app, entity, camera, rect, base, &samples));
+            } else {
+                faces.extend(shaded_faces(
+                    transform,
+                    camera,
+                    rect,
+                    base,
+                    app.shading_mode,
+                ));
+            }
         }
         faces.sort_by(|left, right| right.depth.total_cmp(&left.depth));
         for face in faces {
@@ -597,7 +724,11 @@ fn paint_entities(app: &EditorApp, ui: &mut Ui, rect: Rect, camera: Camera3D) {
     for entity in &app.document.scene().entities {
         let transform = displayed_transform(app, entity);
         let selected = app.document.selection().contains(&entity.id);
-        let color = color_for(entity, selected);
+        let color = if is_marker(entity) {
+            marker_color(app, entity, selected)
+        } else {
+            color_for(entity, selected)
+        };
         let stroke = Stroke::new(
             if selected {
                 2.0
@@ -812,6 +943,7 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
             .and_then(|id| app.material_map.get(*id))
             .unwrap_or("Sin material");
         ui.label(format!("Material: {assigned}"));
+        ui.label(format!("Luces: {}", app.light_map.len()));
         ui.label(format!("Distancia {:.1}", app.camera3d.distance));
         ui.label("Derecho orbitar · central desplazar · rueda zoom");
         ui.separator();
@@ -1098,6 +1230,107 @@ mod tests {
     }
 
     #[test]
+    fn light_response_keeps_the_fixed_light_without_editor_lights() {
+        assert_eq!(
+            light_response(&[], [0.0; 3], [0.0, 1.0, 0.0]),
+            [shade_factor([0.0, 1.0, 0.0]); 3]
+        );
+    }
+
+    #[test]
+    fn directional_lights_tint_each_channel() {
+        let sample = LightSample {
+            kind: LightKind::Directional,
+            color: [1.0, 0.0, 0.0],
+            intensity: 1.0,
+            direction: [0.0, 1.0, 0.0],
+            position: [0.0; 3],
+            range: 10.0,
+        };
+        assert_eq!(
+            light_response(&[sample], [0.0; 3], [0.0, 1.0, 0.0]),
+            [1.0, AMBIENT, AMBIENT]
+        );
+        assert_eq!(
+            light_response(&[sample], [0.0; 3], [0.0, -1.0, 0.0]),
+            [AMBIENT; 3]
+        );
+    }
+
+    #[test]
+    fn point_lights_attenuate_and_stop_at_their_range() {
+        let sample = LightSample {
+            kind: LightKind::Point,
+            color: [1.0; 3],
+            intensity: 1.0,
+            direction: [0.0; 3],
+            position: [0.0, 2.0, 0.0],
+            range: 4.0,
+        };
+        let near = light_response(&[sample], [0.0; 3], [0.0, 1.0, 0.0]);
+        let far = light_response(&[sample], [0.0, -3.0, 0.0], [0.0, 1.0, 0.0]);
+        assert!((near[0] - 0.85).abs() < 0.001, "{near:?}");
+        assert_eq!(far, [AMBIENT; 3]);
+    }
+
+    #[test]
+    fn several_lights_accumulate_and_clamp() {
+        let sample = LightSample {
+            kind: LightKind::Directional,
+            color: [1.0; 3],
+            intensity: 1.0,
+            direction: [0.0, 1.0, 0.0],
+            position: [0.0; 3],
+            range: 10.0,
+        };
+        assert_eq!(
+            light_response(&[sample, sample], [0.0; 3], [0.0, 1.0, 0.0]),
+            [1.0; 3]
+        );
+    }
+
+    #[test]
+    fn lit_faces_use_the_editor_lights_and_the_marker_shows_their_color() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_view3d_light_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.path = root.join("scene.json");
+        app.document = EditorDocument::new();
+        app.apply(EditorCommand::CreateEntity { id: 1, name: None });
+        app.commit_light(
+            1,
+            Some(Light {
+                kind: LightKind::Directional,
+                color: [1.0, 0.0, 0.0],
+                intensity: 1.0,
+                direction: [0.0, 1.0, 0.0],
+                ..Light::default()
+            }),
+        );
+        let samples = light_samples(&app);
+        assert_eq!(samples.len(), 1);
+        let entity = app.document.scene().entities[0].clone();
+        let faces = lit_faces(
+            &app,
+            &entity,
+            Camera3D::default(),
+            rect(),
+            Color32::from_gray(200),
+            &samples,
+        );
+        assert!(
+            faces.iter().any(|face| face.color.r() > face.color.g()),
+            "{faces:?}"
+        );
+        assert_eq!(
+            marker_color(&app, &entity, false),
+            Color32::from_rgb(255, 0, 0)
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn shaded_faces_are_ordered_back_to_front() {
         let faces = shaded_faces(
             Transform {
@@ -1176,6 +1409,7 @@ mod tests {
         assert!(texts.iter().any(|text| text.contains("Sombreado")));
         assert!(texts.iter().any(|text| text == "Alámbrico"));
         assert!(texts.iter().any(|text| text == "Material: Sin material"));
+        assert!(texts.iter().any(|text| text == "Luces: 0"));
     }
 
     #[test]

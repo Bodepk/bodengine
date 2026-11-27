@@ -67,11 +67,13 @@ pub(crate) enum EntityTemplate {
     Mesh,
     Camera2D,
     Light2D,
+    /// Luz del editor con sidecar propio (E49, ADR-050).
+    Light3D,
 }
 
 impl EntityTemplate {
     /// Orden estable del menú.
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::Empty,
         Self::Sprite,
         Self::Audio,
@@ -79,6 +81,7 @@ impl EntityTemplate {
         Self::Mesh,
         Self::Camera2D,
         Self::Light2D,
+        Self::Light3D,
     ];
 
     #[must_use]
@@ -91,6 +94,7 @@ impl EntityTemplate {
             Self::Mesh => "Malla (primer glTF)",
             Self::Camera2D => "Cámara 2D (marcador)",
             Self::Light2D => "Luz 2D (marcador)",
+            Self::Light3D => "Luz 3D (marcador)",
         }
     }
 
@@ -105,6 +109,7 @@ impl EntityTemplate {
             Self::Mesh => format!("Malla {id}"),
             Self::Camera2D => format!("Cámara 2D {id}"),
             Self::Light2D => format!("Luz 2D {id}"),
+            Self::Light3D => format!("Luz 3D {id}"),
         }
     }
 
@@ -115,7 +120,7 @@ impl EntityTemplate {
             Self::Sprite => Some(AssetKind::Image),
             Self::Audio => Some(AssetKind::Audio),
             Self::Mesh => Some(AssetKind::Mesh),
-            Self::Empty | Self::Collider2D | Self::Camera2D | Self::Light2D => None,
+            Self::Empty | Self::Collider2D | Self::Camera2D | Self::Light2D | Self::Light3D => None,
         }
     }
 }
