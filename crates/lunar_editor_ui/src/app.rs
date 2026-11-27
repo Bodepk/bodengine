@@ -199,7 +199,7 @@ impl EditorApp {
             asset_search: String::new(),
             asset_folder: String::new(),
             asset_kind_filter: None,
-            asset_view: AssetView::default(),
+            asset_view: settings.asset_view,
             selected_asset: None,
             asset_options: ImportOptions::default(),
             asset_options_path: None,
@@ -211,7 +211,7 @@ impl EditorApp {
             script_diag_stamp: 0,
             script_last_poll: 0,
             view_mode: ViewMode::default(),
-            shading_mode: crate::view3d::ShadingMode::default(),
+            shading_mode: settings.shading_mode,
             camera3d: Camera3D::default(),
             view3d_drag: Drag3D::default(),
             view_center: settings.center,
@@ -418,18 +418,24 @@ impl EditorApp {
         self.selection_anchor = None;
     }
 
-    /// Persiste las preferencias de la GUI (ADR-031). Un fallo de escritura no
-    /// altera el estado del editor.
-    pub(crate) fn save_settings(&self) {
-        let settings = crate::settings::EditorSettings {
+    /// Vista de las preferencias que se persisten (ADR-031/044).
+    pub(crate) fn editor_settings(&self) -> crate::settings::EditorSettings {
+        crate::settings::EditorSettings {
             assets_root: self.assets_root_text.clone(),
             center: self.view_center,
             zoom: self.zoom,
             show_grid: self.show_grid,
             snap: self.snap,
             transform_space: self.transform_space,
-        };
-        let _ = crate::settings::save(&settings);
+            shading_mode: self.shading_mode,
+            asset_view: self.asset_view,
+        }
+    }
+
+    /// Persiste las preferencias de la GUI (ADR-031). Un fallo de escritura no
+    /// altera el estado del editor.
+    pub(crate) fn save_settings(&self) {
+        let _ = crate::settings::save(&self.editor_settings());
     }
 
     pub(crate) fn undo(&mut self) {
@@ -1571,6 +1577,18 @@ mod tests {
             3.0
         );
         assert!(!app.document.is_dirty());
+    }
+
+    #[test]
+    fn presentation_preferences_are_included_in_saved_settings() {
+        let mut app = fresh_app();
+        app.shading_mode = crate::view3d::ShadingMode::Lit;
+        app.asset_view = AssetView::Grid;
+
+        let restored = crate::settings::decode(&crate::settings::encode(&app.editor_settings()));
+
+        assert_eq!(restored.shading_mode, crate::view3d::ShadingMode::Lit);
+        assert_eq!(restored.asset_view, AssetView::Grid);
     }
 
     #[test]

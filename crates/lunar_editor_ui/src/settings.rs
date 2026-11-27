@@ -5,8 +5,10 @@
 
 use std::path::PathBuf;
 
+use crate::assets::AssetView;
 use crate::config::config_dir;
 use crate::tools::TransformSpace;
+use crate::view3d::ShadingMode;
 
 pub(crate) const DEFAULT_ASSETS_ROOT: &str = "examples/sprite_platformer/assets";
 pub(crate) const MIN_ZOOM: f32 = 8.0;
@@ -21,6 +23,10 @@ pub(crate) struct EditorSettings {
     pub(crate) snap: bool,
     /// Espacio del gizmo (E14). Se guarda como texto estable, no como `Debug`.
     pub(crate) transform_space: TransformSpace,
+    /// Relleno de la vista 3D (E44, ADR-037/044).
+    pub(crate) shading_mode: ShadingMode,
+    /// Vista del content browser (E44, ADR-038/044).
+    pub(crate) asset_view: AssetView,
 }
 
 impl Default for EditorSettings {
@@ -32,6 +38,8 @@ impl Default for EditorSettings {
             show_grid: true,
             snap: false,
             transform_space: TransformSpace::default(),
+            shading_mode: ShadingMode::default(),
+            asset_view: AssetView::default(),
         }
     }
 }
@@ -44,8 +52,17 @@ pub(crate) fn encode(settings: &EditorSettings) -> String {
         TransformSpace::Global => "global",
         TransformSpace::Local => "local",
     };
+    let shading = match settings.shading_mode {
+        ShadingMode::Wireframe => "wireframe",
+        ShadingMode::Solid => "solid",
+        ShadingMode::Lit => "lit",
+    };
+    let view = match settings.asset_view {
+        AssetView::List => "list",
+        AssetView::Grid => "grid",
+    };
     format!(
-        "assets_root={root}\ncenter_x={}\ncenter_y={}\nzoom={}\nshow_grid={}\nsnap={}\ntransform_space={space}\n",
+        "assets_root={root}\ncenter_x={}\ncenter_y={}\nzoom={}\nshow_grid={}\nsnap={}\ntransform_space={space}\nshading_mode={shading}\nasset_view={view}\n",
         settings.center[0], settings.center[1], settings.zoom, settings.show_grid, settings.snap
     )
 }
@@ -89,6 +106,26 @@ pub(crate) fn decode(contents: &str) -> EditorSettings {
                     TransformSpace::Global
                 } else {
                     settings.transform_space
+                };
+            }
+            "shading_mode" => {
+                settings.shading_mode = if value.eq_ignore_ascii_case("solid") {
+                    ShadingMode::Solid
+                } else if value.eq_ignore_ascii_case("lit") {
+                    ShadingMode::Lit
+                } else if value.eq_ignore_ascii_case("wireframe") {
+                    ShadingMode::Wireframe
+                } else {
+                    settings.shading_mode
+                };
+            }
+            "asset_view" => {
+                settings.asset_view = if value.eq_ignore_ascii_case("grid") {
+                    AssetView::Grid
+                } else if value.eq_ignore_ascii_case("list") {
+                    AssetView::List
+                } else {
+                    settings.asset_view
                 };
             }
             _ => {}
@@ -152,6 +189,8 @@ mod tests {
             show_grid: false,
             snap: true,
             transform_space: TransformSpace::Local,
+            shading_mode: ShadingMode::Lit,
+            asset_view: AssetView::Grid,
         };
         assert_eq!(decode(&encode(&settings)), settings);
     }
@@ -171,6 +210,24 @@ mod tests {
             TransformSpace::Global
         );
         assert!(encode(&EditorSettings::default()).contains("transform_space=global"));
+    }
+
+    #[test]
+    fn shading_mode_and_asset_view_are_persisted_and_validated() {
+        let settings = decode("shading_mode=LIT\nasset_view=GRID\n");
+        assert_eq!(settings.shading_mode, ShadingMode::Lit);
+        assert_eq!(settings.asset_view, AssetView::Grid);
+        assert_eq!(
+            decode("shading_mode=raro\nasset_view=?").shading_mode,
+            ShadingMode::Wireframe
+        );
+        assert_eq!(
+            decode("shading_mode=raro\nasset_view=?").asset_view,
+            AssetView::List
+        );
+        let encoded = encode(&EditorSettings::default());
+        assert!(encoded.contains("shading_mode=wireframe"));
+        assert!(encoded.contains("asset_view=list"));
     }
 
     #[test]

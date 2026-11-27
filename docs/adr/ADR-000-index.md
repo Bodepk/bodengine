@@ -60,6 +60,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [041](ADR-041-snap-rotacion-escala.md) | Snap de rotación y escala en el editor | Aceptada |
 | [042](ADR-042-timeline-animaciones.md) | Timeline de animaciones en el editor | Aceptada |
 | [043](ADR-043-propagar-prefabs.md) | Propagar cambios de prefab a instancias | Aceptada |
+| [044](ADR-044-persistencia-vistas-editor.md) | Persistencia del sombreado 3D y de la vista de assets | Aceptada |
 
 ## Consecuencias
 
