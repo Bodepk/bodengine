@@ -796,6 +796,38 @@ mod tests {
     }
 
     #[test]
+    fn toolbar_shows_the_2d_and_3d_toggle() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(900.0, 700.0))),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Lienzo de prueba").show(ctx, |ui| canvas_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut second = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Lienzo de prueba").show(ctx, |ui| canvas_ui(&mut app, ui));
+        });
+        second.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Lienzo de prueba").show(ctx, |ui| canvas_ui(&mut app, ui));
+        });
+        output.textures_delta.clear();
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.iter().any(|text| text == "2D"), "{texts:?}");
+        assert!(texts.iter().any(|text| text == "3D"), "{texts:?}");
+    }
+
+    #[test]
     fn rectangular_selection_includes_intersecting_items() {
         let items = [
             item(1, Pos2::new(100.0, 100.0)),

@@ -357,6 +357,30 @@ pub(crate) fn box_hit(camera: Camera3D, rect: Rect, pointer: Pos2, corners: [[f3
     })
 }
 
+/// Las plantillas de cámara y luz crean marcadores de transformación (ADR-032).
+#[must_use]
+pub(crate) fn is_marker(entity: &SceneEntity) -> bool {
+    entity
+        .name
+        .as_deref()
+        .is_some_and(|name| name.starts_with("Cámara") || name.starts_with("Luz"))
+}
+
+/// Comprueba el picking sobre la cruz de ejes de un marcador.
+#[must_use]
+pub(crate) fn marker_hit(camera: Camera3D, rect: Rect, pointer: Pos2, center: [f32; 3]) -> bool {
+    [Axis::X, Axis::Y, Axis::Z].iter().any(|axis| {
+        let vector = scale(axis.vector(), 0.6);
+        let start = sub(center, vector);
+        let end = add(center, vector);
+        if let (Some(a), Some(b)) = (project(start, camera, rect), project(end, camera, rect)) {
+            point_segment_distance(pointer, a, b) <= PICK_RADIUS
+        } else {
+            false
+        }
+    })
+}
+
 fn color_for(entity: &SceneEntity, selected: bool) -> Color32 {
     if selected {
         Color32::from_rgb(120, 170, 255)
@@ -415,28 +439,40 @@ fn paint_axes(ui: &mut Ui, rect: Rect, camera: Camera3D) {
 
 fn paint_entities(app: &EditorApp, ui: &mut Ui, rect: Rect, camera: Camera3D) {
     for entity in &app.document.scene().entities {
-        let corners = box_corners(displayed_transform(app, entity));
-        let projected: Vec<Option<Pos2>> = corners
-            .iter()
-            .map(|corner| project(*corner, camera, rect))
-            .collect();
+        let transform = displayed_transform(app, entity);
         let selected = app.document.selection().contains(&entity.id);
         let color = color_for(entity, selected);
         let stroke = Stroke::new(if selected { 2.0 } else { 1.0 }, color);
-        for (start, end) in EDGES {
-            if let (Some(a), Some(b)) = (projected[start], projected[end]) {
-                ui.painter().line_segment([a, b], stroke);
+        if is_marker(entity) {
+            for axis in [Axis::X, Axis::Y, Axis::Z] {
+                let vector = scale(axis.vector(), 0.6);
+                if let (Some(a), Some(b)) = (
+                    project(sub(transform.translation, vector), camera, rect),
+                    project(add(transform.translation, vector), camera, rect),
+                ) {
+                    ui.painter().line_segment([a, b], stroke);
+                }
+            }
+        } else {
+            let projected: Vec<Option<Pos2>> = box_corners(transform)
+                .iter()
+                .map(|corner| project(*corner, camera, rect))
+                .collect();
+            for (start, end) in EDGES {
+                if let (Some(a), Some(b)) = (projected[start], projected[end]) {
+                    ui.painter().line_segment([a, b], stroke);
+                }
             }
         }
-        if let Some(center) = project(displayed_transform(app, entity).translation, camera, rect) {
-            let label = entity
+        if let Some(center) = project(transform.translation, camera, rect) {
+            let name = entity
                 .name
                 .clone()
                 .unwrap_or_else(|| format!("Entidad {}", entity.id));
             ui.painter().text(
                 center + Vec2::new(6.0, -6.0),
                 egui::Align2::LEFT_BOTTOM,
-                label,
+                format!("{name} #{}", entity.id),
                 egui::FontId::proportional(11.0),
                 color,
             );
@@ -512,12 +548,12 @@ fn handle_selection(
             .entities
             .iter()
             .find(|entity| {
-                box_hit(
-                    camera,
-                    rect,
-                    pointer,
-                    box_corners(displayed_transform(app, entity)),
-                )
+                let transform = displayed_transform(app, entity);
+                if is_marker(entity) {
+                    marker_hit(camera, rect, pointer, transform.translation)
+                } else {
+                    box_hit(camera, rect, pointer, box_corners(transform))
+                }
             })
             .map(|entity| entity.id);
         let mut selection = if additive {
@@ -762,6 +798,35 @@ mod tests {
         assert_eq!(app.document.undo_len(), history + 1);
         app.undo();
         assert_eq!(app.document.scene().entities[0].transform, original);
+    }
+
+    #[test]
+    fn camera_and_light_templates_are_markers() {
+        let marker = |name: &str| SceneEntity {
+            id: 1,
+            name: Some(name.to_string()),
+            parent: None,
+            transform: Transform::default(),
+            components: Vec::new(),
+        };
+        assert!(is_marker(&marker("Cámara 2D 7")));
+        assert!(is_marker(&marker("Luz 2D 8")));
+        assert!(!is_marker(&marker("Malla 9")));
+        assert!(!is_marker(&SceneEntity::new(10)));
+    }
+
+    #[test]
+    fn marker_cross_is_pickable() {
+        let camera = Camera3D::default();
+        let origin = project([0.0; 3], camera, rect()).unwrap();
+        let delta = axis_screen_delta(camera, rect(), [0.0; 3], Axis::X).unwrap();
+        assert!(marker_hit(camera, rect(), origin + delta * 0.3, [0.0; 3]));
+        assert!(!marker_hit(
+            camera,
+            rect(),
+            Pos2::new(-500.0, -500.0),
+            [0.0; 3]
+        ));
     }
 
     #[test]

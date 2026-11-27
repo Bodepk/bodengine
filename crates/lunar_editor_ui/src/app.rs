@@ -665,6 +665,9 @@ impl EditorApp {
         if actions.scale_tool {
             self.transform_mode = TransformMode::Scale;
         }
+        if self.view_mode == ViewMode::ThreeD && (actions.rotate_tool || actions.scale_tool) {
+            self.set_status("En la vista 3D, rotar y escalar se hacen desde el inspector");
+        }
     }
 
     fn sync_inspector(&mut self) {
