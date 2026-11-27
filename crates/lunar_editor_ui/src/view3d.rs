@@ -8,6 +8,7 @@ use lunar_scenes::{Component, SceneEntity, Transform};
 
 use crate::app::EditorApp;
 use crate::assets::AssetKind;
+use crate::dnd::AssetDrag;
 use crate::gizmo::{Originals, group_pivot, space_axes, translate_group};
 use crate::play::PlayState;
 use crate::tools::{TransformMode, TransformSpace};
@@ -355,6 +356,25 @@ pub(crate) fn shaded_faces(
     faces
 }
 
+/// Color del material asignado a una entidad, si está cargado (ADR-049).
+#[must_use]
+pub(crate) fn material_fill_color(app: &EditorApp, entity: &SceneEntity) -> Option<Color32> {
+    app.material_map
+        .get(entity.id)
+        .and_then(|path| app.material_library.get(path))
+        .map(|material| material.preview_color())
+}
+
+/// Color base de las caras: en `Lit` usa el material asignado (ADR-049).
+#[must_use]
+pub(crate) fn fill_color(app: &EditorApp, entity: &SceneEntity, selected: bool) -> Color32 {
+    if app.shading_mode.lit() {
+        material_fill_color(app, entity).unwrap_or_else(|| color_for(entity, selected))
+    } else {
+        color_for(entity, selected)
+    }
+}
+
 /// Transformación que se debe dibujar: la simulación escribe en `preview`.
 #[must_use]
 pub(crate) fn displayed_transform(app: &EditorApp, entity: &SceneEntity) -> Transform {
@@ -454,6 +474,29 @@ pub(crate) fn is_marker(entity: &SceneEntity) -> bool {
         .is_some_and(|name| name.starts_with("Cámara") || name.starts_with("Luz"))
 }
 
+/// Entidad bajo el puntero, compartida por selección y arrastre de materiales.
+#[must_use]
+pub(crate) fn entity_at(
+    app: &EditorApp,
+    camera: Camera3D,
+    rect: Rect,
+    pointer: Pos2,
+) -> Option<u64> {
+    app.document
+        .scene()
+        .entities
+        .iter()
+        .find(|entity| {
+            let transform = displayed_transform(app, entity);
+            if is_marker(entity) {
+                marker_hit(camera, rect, pointer, transform.translation)
+            } else {
+                box_hit(camera, rect, pointer, box_corners(transform))
+            }
+        })
+        .map(|entity| entity.id)
+}
+
 /// Comprueba el picking sobre la cruz de ejes de un marcador.
 #[must_use]
 pub(crate) fn marker_hit(camera: Camera3D, rect: Rect, pointer: Pos2, center: [f32; 3]) -> bool {
@@ -538,7 +581,7 @@ fn paint_entities(app: &EditorApp, ui: &mut Ui, rect: Rect, camera: Camera3D) {
                 transform,
                 camera,
                 rect,
-                color_for(entity, selected),
+                fill_color(app, entity, selected),
                 app.shading_mode,
             ));
         }
@@ -679,20 +722,7 @@ fn handle_selection(
         }
     }
     if response.clicked() {
-        let hit = app
-            .document
-            .scene()
-            .entities
-            .iter()
-            .find(|entity| {
-                let transform = displayed_transform(app, entity);
-                if is_marker(entity) {
-                    marker_hit(camera, rect, pointer, transform.translation)
-                } else {
-                    box_hit(camera, rect, pointer, box_corners(transform))
-                }
-            })
-            .map(|entity| entity.id);
+        let hit = entity_at(app, camera, rect, pointer);
         let (ctrl, shift) = ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
         if let Some(id) = hit {
             app.select_clicked(id, ctrl, shift);
@@ -775,6 +805,13 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
                     }
                 }
             });
+        let assigned = app
+            .document
+            .selection()
+            .first()
+            .and_then(|id| app.material_map.get(*id))
+            .unwrap_or("Sin material");
+        ui.label(format!("Material: {assigned}"));
         ui.label(format!("Distancia {:.1}", app.camera3d.distance));
         ui.label("Derecho orbitar · central desplazar · rueda zoom");
         ui.separator();
@@ -827,30 +864,46 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
     );
 }
 
-/// Suelta de un asset en la vista 3D: solo las mallas crean una entidad.
+/// Suelta de un asset en la vista 3D: mallas crean entidades y materiales se asignan (ADR-049).
 fn handle_drop(app: &mut EditorApp, ui: &Ui, rect: Rect, response: &Response) {
     if !ui.input(|input| input.pointer.any_released()) {
         return;
     }
-    if !response
-        .hover_pos()
-        .is_some_and(|point| rect.contains(point))
-    {
+    let Some(pointer) = response.hover_pos().filter(|point| rect.contains(*point)) else {
         return;
-    }
+    };
     let Some(drag) = crate::dnd::take_asset(ui.ctx()) else {
         return;
     };
-    if drag.kind != AssetKind::Mesh {
-        app.set_status("La vista 3D solo acepta mallas glTF");
-        return;
+    let camera = app.camera3d;
+    apply_asset_drop(app, pointer, rect, camera, &drag);
+}
+
+/// Aplica un asset soltado sobre el punto de la vista 3D (ADR-049).
+fn apply_asset_drop(
+    app: &mut EditorApp,
+    pointer: Pos2,
+    rect: Rect,
+    camera: Camera3D,
+    drag: &AssetDrag,
+) {
+    match drag.kind {
+        AssetKind::Mesh => app.create_entity_from_asset(&drag.path, [0.0, 0.0]),
+        AssetKind::Material => {
+            let Some(id) = entity_at(app, camera, rect, pointer) else {
+                app.set_status("Suelta el material sobre una entidad para asignarlo");
+                return;
+            };
+            app.assign_material_to_entity(id, Some(&drag.path));
+        }
+        _ => app.set_status("La vista 3D acepta mallas y materiales"),
     }
-    app.create_entity_from_asset(&drag.path, [0.0, 0.0]);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::materials::Material;
     use lunar_editor::{EditorCommand, EditorDocument};
 
     fn rect() -> Rect {
@@ -1122,5 +1175,89 @@ mod tests {
         assert!(texts.iter().any(|text| text == "Local (Q)"));
         assert!(texts.iter().any(|text| text.contains("Sombreado")));
         assert!(texts.iter().any(|text| text == "Alámbrico"));
+        assert!(texts.iter().any(|text| text == "Material: Sin material"));
+    }
+
+    #[test]
+    fn material_fill_color_is_used_only_in_lit_mode() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = EditorDocument::new();
+        app.apply(EditorCommand::CreateEntity { id: 1, name: None });
+        let red = Color32::from_rgba_unmultiplied(255, 0, 0, 255);
+        app.material_library.insert(
+            "rojo.material.json".to_owned(),
+            Material {
+                albedo: [1.0, 0.0, 0.0, 1.0],
+                roughness: 0.0,
+                ..Material::default()
+            },
+        );
+        app.material_map
+            .set(1, Some("rojo.material.json".to_owned()));
+        let entity = app.document.scene().entities[0].clone();
+
+        assert_eq!(material_fill_color(&app, &entity), Some(red));
+        app.shading_mode = ShadingMode::Lit;
+        assert_eq!(fill_color(&app, &entity, true), red);
+        app.shading_mode = ShadingMode::Solid;
+        assert_ne!(fill_color(&app, &entity, true), red);
+        app.material_map.set(1, None);
+        assert_eq!(material_fill_color(&app, &entity), None);
+    }
+
+    #[test]
+    fn dropping_a_material_assigns_it_to_the_entity_under_pointer() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_view3d_mat_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.path = root.join("scene.json");
+        app.document = EditorDocument::new();
+        app.apply(EditorCommand::CreateEntity { id: 1, name: None });
+        app.material_library
+            .insert("piedra.material.json".to_owned(), Material::default());
+        let camera = app.camera3d;
+        let pointer = project([0.0; 3], camera, rect()).unwrap();
+        let drag = AssetDrag::new("piedra.material.json", AssetKind::Material);
+        let history = app.document.undo_len();
+
+        apply_asset_drop(&mut app, pointer, rect(), camera, &drag);
+
+        assert_eq!(app.material_map.get(1), Some("piedra.material.json"));
+        assert_eq!(app.document.undo_len(), history + 1);
+        let sidecar = std::fs::read_to_string(app.material_map_path()).expect("sidecar");
+        assert!(sidecar.contains("1=piedra.material.json"), "{sidecar}");
+        app.undo();
+        assert_eq!(app.material_map.get(1), None);
+        assert_eq!(app.document.undo_len(), history);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dropping_a_material_on_empty_space_only_reports_it() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_view3d_empty_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.path = root.join("scene.json");
+        app.document = EditorDocument::new();
+        app.apply(EditorCommand::CreateEntity { id: 1, name: None });
+        app.material_library
+            .insert("piedra.material.json".to_owned(), Material::default());
+        let camera = app.camera3d;
+        let drag = AssetDrag::new("piedra.material.json", AssetKind::Material);
+        let history = app.document.undo_len();
+
+        apply_asset_drop(&mut app, Pos2::new(-500.0, -500.0), rect(), camera, &drag);
+
+        assert_eq!(app.material_map.get(1), None);
+        assert_eq!(app.document.undo_len(), history);
+        assert!(app.status_log.iter().any(|entry| {
+            entry
+                .message
+                .contains("Suelta el material sobre una entidad")
+        }));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

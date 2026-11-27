@@ -359,16 +359,24 @@ impl EditorApp {
         if !self.ensure_editable() {
             return;
         }
+        let Some(id) = self.document.selection().first().copied() else {
+            self.set_status("Selecciona una entidad para asignar el material");
+            return;
+        };
+        self.assign_material_to_entity(id, path);
+    }
+
+    /// Asigna un material a una entidad concreta, también desde la vista 3D (E48).
+    pub(crate) fn assign_material_to_entity(&mut self, id: u64, path: Option<&str>) {
+        if !self.ensure_editable() {
+            return;
+        }
         if let Some(path) = path
             && self.material_library.get(path).is_none()
         {
             self.set_status(format!("Material no cargado: {path}"));
             return;
         }
-        let Some(id) = self.document.selection().first().copied() else {
-            self.set_status("Selecciona una entidad para asignar el material");
-            return;
-        };
         if self.material_map.get(id) == path {
             return;
         }
