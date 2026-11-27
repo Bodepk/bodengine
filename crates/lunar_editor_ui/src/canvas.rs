@@ -15,7 +15,7 @@ use crate::helpers::{
 };
 use crate::play::PlayState;
 use crate::tools::TransformMode;
-use crate::view3d::ViewMode;
+use crate::view3d::{Drag3D, ViewMode};
 
 /// Vista ortográfica del lienzo: centro en mundo y píxeles por unidad.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -107,15 +107,19 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
             .selectable_label(app.view_mode == ViewMode::TwoD, ViewMode::TwoD.label())
             .clicked()
         {
+            commit_preview(app);
             app.view_mode = ViewMode::TwoD;
             app.drag = CanvasDrag::None;
+            app.view3d_drag = Drag3D::None;
         }
         if ui
             .selectable_label(app.view_mode == ViewMode::ThreeD, ViewMode::ThreeD.label())
             .clicked()
         {
+            commit_preview(app);
             app.view_mode = ViewMode::ThreeD;
             app.drag = CanvasDrag::None;
+            app.view3d_drag = Drag3D::None;
         }
         ui.label("W mover · E rotar · R escalar · F encuadrar · rueda zoom · derecho paneo");
         if app.play_state != PlayState::Stopped {
@@ -673,6 +677,24 @@ fn handle_pointer(
     }
 }
 
+/// Convierte las transformaciones temporales en comandos reales. Lo usan el
+/// lienzo 2D y la vista 3D para que un arrastre produzca un solo `SetTransform`.
+pub(crate) fn commit_preview(app: &mut EditorApp) {
+    let previews: Vec<(u64, Transform)> = app.preview.drain().collect();
+    for (id, transform) in previews {
+        let current = app
+            .document
+            .scene()
+            .entities
+            .iter()
+            .find(|entity| entity.id == id)
+            .map(|entity| entity.transform);
+        if current != Some(transform) {
+            app.apply(lunar_editor::EditorCommand::SetTransform { id, transform });
+        }
+    }
+}
+
 fn commit_drag(app: &mut EditorApp, ui: &mut Ui, items: &[DrawItem]) {
     if !ui.input(|input| input.pointer.any_released()) {
         return;
@@ -698,19 +720,7 @@ fn commit_drag(app: &mut EditorApp, ui: &mut Ui, items: &[DrawItem]) {
         app.document.select(&selection);
     }
 
-    let previews: Vec<(u64, Transform)> = app.preview.drain().collect();
-    for (id, transform) in previews {
-        let current = app
-            .document
-            .scene()
-            .entities
-            .iter()
-            .find(|entity| entity.id == id)
-            .map(|entity| entity.transform);
-        if current != Some(transform) {
-            app.apply(lunar_editor::EditorCommand::SetTransform { id, transform });
-        }
-    }
+    commit_preview(app);
     app.drag = CanvasDrag::None;
     if was_pan {
         app.save_settings();

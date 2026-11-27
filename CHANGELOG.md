@@ -23,6 +23,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - E5 del editor: consola con búsqueda por texto, contador de visibles, tiempo relativo por entrada, agrupación de repetidos con `×N` y botón `Copiar` al portapapeles.
 - E6 del editor: flujo completo crear→seleccionar→editar→guardar→Play cubierto por un test de integración headless; todas las acciones de escena (incluidos los botones de la barra) comparten el bloqueo durante Play y detener la simulación conserva el historial de undo/redo.
 - ADR-032 V1: botón `2D`/`3D` en el lienzo, cámara orbital CPU con zoom y paneo, rejilla XZ, ejes y cajas alámbricas de las entidades, sin dependencias nuevas ni GPU en el editor.
+- ADR-032 V2: selección por cajas proyectadas en 3D y gizmo de traslación X/Y/Z que envía un único `SetTransform` al soltar, respetando el bloqueo de Play, el snap de 0.25 y el undo/redo.
 
 ### Cambiado
 

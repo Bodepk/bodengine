@@ -15,7 +15,7 @@ use crate::play::{PlayState, dynamic_ids, floor_y, step_vertical};
 use crate::recent;
 use crate::status::{ConsoleFilter, LogEntry};
 use crate::tools::{EntityTemplate, TransformMode};
-use crate::view3d::{Camera3D, ViewMode};
+use crate::view3d::{Camera3D, Drag3D, ViewMode};
 use crate::{hierarchy, inspector};
 
 /// Acción que espera a resolver el aviso de cambios sin guardar.
@@ -71,6 +71,7 @@ pub(crate) struct EditorApp {
     pub(crate) selected_asset: Option<String>,
     pub(crate) view_mode: ViewMode,
     pub(crate) camera3d: Camera3D,
+    pub(crate) view3d_drag: Drag3D,
     pub(crate) view_center: [f32; 2],
     pub(crate) zoom: f32,
     pub(crate) show_grid: bool,
@@ -145,6 +146,7 @@ impl EditorApp {
             selected_asset: None,
             view_mode: ViewMode::default(),
             camera3d: Camera3D::default(),
+            view3d_drag: Drag3D::default(),
             view_center: settings.center,
             zoom: settings.zoom,
             show_grid: settings.show_grid,
@@ -177,7 +179,7 @@ impl EditorApp {
     /// Única comprobación de que la escena se puede tocar. La usan tanto los
     /// atajos como los botones de la barra, para que ninguna acción escape al
     /// bloqueo durante Play (E6).
-    fn ensure_editable(&mut self) -> bool {
+    pub(crate) fn ensure_editable(&mut self) -> bool {
         if self.play_state == PlayState::Stopped {
             true
         } else {
@@ -561,6 +563,7 @@ impl EditorApp {
         self.play_velocities.clear();
         self.preview.clear();
         self.drag = CanvasDrag::None;
+        self.view3d_drag = Drag3D::None;
         self.set_status("Play detenido; vista previa descartada");
     }
 
