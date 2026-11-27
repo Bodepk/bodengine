@@ -65,6 +65,10 @@ pub enum EditorCommand {
         index: usize,
         component: Component,
     },
+    /// Sustituye varios componentes por índice en un solo paso (E16).
+    SetComponents {
+        changes: Vec<(u64, usize, Component)>,
+    },
     /// Elimina un componente por índice.
     RemoveComponent { id: u64, index: usize },
     /// Reordena una entidad dentro del vector de la escena (ADR-020).
@@ -326,6 +330,22 @@ fn mutate(
             };
             *slot = component.clone();
         }
+        EditorCommand::SetComponents { changes } => {
+            // Validar el lote completo antes de escribir: un índice inválido
+            // no debe dejar algunos componentes reescritos (E16).
+            for (id, index, _) in changes {
+                let entity = entity_mut(scene, *id)?;
+                if *index >= entity.components.len() {
+                    return Err(EditorError::ComponentIndex {
+                        id: *id,
+                        index: *index,
+                    });
+                }
+            }
+            for (id, index, component) in changes {
+                entity_mut(scene, *id)?.components[*index] = component.clone();
+            }
+        }
         EditorCommand::RemoveComponent { id, index } => {
             let entity = entity_mut(scene, *id)?;
             if *index >= entity.components.len() {
@@ -486,7 +506,7 @@ fn entity_mut(scene: &mut Scene, id: u64) -> Result<&mut SceneEntity, EditorErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lunar_scenes::{BodyType, SCENE_VERSION, Shape3D};
+    use lunar_scenes::{BodyType, SCENE_VERSION, Shape2D, Shape3D};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1173,6 +1193,102 @@ mod tests {
         assert_eq!(document.scene(), &before);
         assert_eq!(document.undo_len(), history);
         assert!(!document.redo());
+    }
+
+    #[test]
+    fn setting_several_components_is_one_undoable_step() {
+        let mut document = EditorDocument::new();
+        document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create");
+        document
+            .apply(EditorCommand::AddComponent {
+                id: 1,
+                component: Component::Collider2D {
+                    shape: Shape2D::Ball { radius: 0.5 },
+                    body: BodyType::Fixed,
+                },
+            })
+            .expect("collider");
+        document
+            .apply(EditorCommand::AddComponent {
+                id: 1,
+                component: Component::Image {
+                    asset: "viejo.png".to_owned(),
+                },
+            })
+            .expect("image");
+        let history = document.undo_len();
+
+        document
+            .apply(EditorCommand::SetComponents {
+                changes: vec![(
+                    1,
+                    1,
+                    Component::Image {
+                        asset: "nuevo.png".to_owned(),
+                    },
+                )],
+            })
+            .expect("rewrite path");
+
+        assert_eq!(document.undo_len(), history + 1);
+        assert_eq!(
+            document.scene().entities[0].components[1].asset_path(),
+            Some("nuevo.png")
+        );
+        assert!(document.undo());
+        assert_eq!(
+            document.scene().entities[0].components[1].asset_path(),
+            Some("viejo.png")
+        );
+        assert!(document.redo());
+        assert_eq!(
+            document.scene().entities[0].components[1].asset_path(),
+            Some("nuevo.png")
+        );
+    }
+
+    #[test]
+    fn an_invalid_component_batch_leaves_the_scene_untouched() {
+        let mut document = EditorDocument::new();
+        document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create");
+        document
+            .apply(EditorCommand::AddComponent {
+                id: 1,
+                component: Component::Image {
+                    asset: "viejo.png".to_owned(),
+                },
+            })
+            .expect("image");
+        let before = document.scene().clone();
+        let history = document.undo_len();
+
+        assert_eq!(
+            document.apply(EditorCommand::SetComponents {
+                changes: vec![
+                    (
+                        1,
+                        0,
+                        Component::Image {
+                            asset: "nuevo.png".to_owned()
+                        },
+                    ),
+                    (
+                        1,
+                        9,
+                        Component::Image {
+                            asset: "roto.png".to_owned()
+                        },
+                    ),
+                ],
+            }),
+            Err(EditorError::ComponentIndex { id: 1, index: 9 })
+        );
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), history);
     }
 
     #[test]

@@ -49,6 +49,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [030](ADR-030-inspector-componentes.md) | Inspector completo y edición de componentes | Aceptada |
 | [031](ADR-031-preferencias-editor.md) | Preferencias persistentes del editor | Aceptada |
 | [032](ADR-032-vista-3d-cpu-editor.md) | Vista 3D CPU en el editor | Aceptada |
+| [034](ADR-034-guids-assets-editor.md) | GUIDs de assets en el editor | Aceptada |
 | [035](ADR-035-prefabs-editor.md) | Prefabs en el editor | Aceptada |
 
 ## Consecuencias

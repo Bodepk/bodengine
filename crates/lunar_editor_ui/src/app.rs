@@ -77,6 +77,8 @@ pub(crate) struct EditorApp {
     pub(crate) show_log: bool,
     start_time: Instant,
     pub(crate) assets: AssetLibrary,
+    /// GUIDs leídos de los `.meta` y alias de rutas movidas (ADR-034).
+    pub(crate) guid_index: crate::guids::GuidIndex,
     pub(crate) assets_root_text: String,
     pub(crate) asset_search: String,
     pub(crate) asset_folder: String,
@@ -132,6 +134,7 @@ impl EditorApp {
         if let Some(error) = &assets.error {
             status = error.clone();
         }
+        let guid_index = crate::guids::load(&assets.root, &assets.entries);
 
         Self {
             document,
@@ -158,6 +161,7 @@ impl EditorApp {
             show_log: false,
             start_time,
             assets,
+            guid_index,
             assets_root_text,
             asset_search: String::new(),
             asset_folder: String::new(),
@@ -329,7 +333,10 @@ impl EditorApp {
                 self.preview.clear();
                 self.drag = CanvasDrag::None;
                 self.revision += 1;
-                self.set_status(format!("Abierta {path:?}"));
+                self.refresh_guids();
+                let (rewritten, broken) = self.rewrite_asset_paths();
+                let suffix = Self::describe_guid_changes(rewritten, &broken);
+                self.set_status(format!("Abierta {path:?}{suffix}"));
                 self.remember(path);
             }
             Err(error) => self.set_status(format!("No se pudo abrir {path:?}: {error}")),
@@ -381,10 +388,13 @@ impl EditorApp {
         if !self.ensure_editable() {
             return false;
         }
+        self.refresh_guids();
+        let (rewritten, broken) = self.rewrite_asset_paths();
+        let suffix = Self::describe_guid_changes(rewritten, &broken);
         match self.document.save_to_path(&path) {
             Ok(()) => {
                 self.path = path.clone();
-                self.set_status(format!("Guardada {path:?}"));
+                self.set_status(format!("Guardada {path:?}{suffix}"));
                 self.remember(path);
                 true
             }
@@ -598,17 +608,76 @@ impl EditorApp {
         !self.clipboard.is_empty()
     }
 
+    /// Lee los `.meta` existentes sin crear ficheros; se usa al abrir y guardar.
+    fn refresh_guids(&mut self) {
+        if self.assets.error.is_some() {
+            self.guid_index = crate::guids::GuidIndex::default();
+            return;
+        }
+        self.guid_index = crate::guids::load(&self.assets.root, &self.assets.entries);
+    }
+
+    /// Genera los `.meta` ausentes y persiste el índice tras un escaneo explícito.
+    fn rebuild_guids(&mut self) {
+        if self.assets.error.is_some() {
+            self.guid_index = crate::guids::GuidIndex::default();
+            return;
+        }
+        self.guid_index = crate::guids::rebuild(&self.assets.root, &self.assets.entries);
+    }
+
+    /// Reescribe en memoria las rutas resueltas por GUID en un solo paso de
+    /// undo. Las referencias desconocidas se devuelven para informar, sin tocarlas.
+    fn rewrite_asset_paths(&mut self) -> (usize, Vec<String>) {
+        if self.assets.error.is_some() || self.guid_index.is_empty() {
+            return (0, Vec::new());
+        }
+        let broken = crate::guids::broken_paths(self.document.scene(), &self.guid_index);
+        let changes = crate::guids::path_changes(self.document.scene(), &self.guid_index);
+        if changes.is_empty() {
+            return (0, broken);
+        }
+        let count = changes.len();
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::SetComponents { changes });
+        if self.document.undo_len() > history {
+            (count, broken)
+        } else {
+            (0, broken)
+        }
+    }
+
+    fn describe_guid_changes(rewritten: usize, broken: &[String]) -> String {
+        let mut suffix = String::new();
+        if rewritten > 0 {
+            suffix.push_str(&format!("; {rewritten} ruta(s) GUID actualizada(s)"));
+        }
+        if !broken.is_empty() {
+            suffix.push_str(&format!(
+                "; {} referencia(s) rota(s): {}",
+                broken.len(),
+                broken.join(", ")
+            ));
+        }
+        suffix
+    }
+
     pub(crate) fn reload_assets(&mut self, ctx: &Context) {
         self.assets = AssetLibrary::new(PathBuf::from(&self.assets_root_text));
         self.assets.reload(ctx);
-        match &self.assets.error {
-            Some(error) => self.set_status(error.clone()),
-            None => self.set_status(format!(
-                "{} asset(s) en {}",
+        self.rebuild_guids();
+        let (rewritten, broken) = self.rewrite_asset_paths();
+        let suffix = Self::describe_guid_changes(rewritten, &broken);
+        let status = match &self.assets.error {
+            Some(error) => error.clone(),
+            None => format!(
+                "{} asset(s), {} GUID(s) en {}{suffix}",
                 self.assets.entries.len(),
+                self.guid_index.len(),
                 self.assets.root.display()
-            )),
-        }
+            ),
+        };
+        self.set_status(status);
         self.save_settings();
     }
 
@@ -1676,5 +1745,121 @@ mod tests {
         assert_eq!(app.document.scene().entities.len(), 1);
         assert!(app.status.contains("Detén"));
         app.stop_play();
+    }
+
+    fn temp_guid_root(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "lunar_e16_{label}_{}_{}",
+            std::process::id(),
+            crate::guids::fresh_seed()
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        root
+    }
+
+    #[test]
+    fn reloading_guids_rewrites_moved_asset_paths_in_one_undo_step() {
+        let ctx = Context::default();
+        let root = temp_guid_root("move");
+        let _ = std::fs::write(root.join("jump.wav"), b"wav");
+        let mut app = fresh_app();
+        app.assets = AssetLibrary::new(root.clone());
+        app.assets.reload(&ctx);
+        app.rebuild_guids();
+
+        let guid = app
+            .guid_index
+            .guid_for("jump.wav")
+            .expect("guid for jump.wav")
+            .to_owned();
+        assert!(crate::guids::is_guid(&guid));
+        assert_eq!(
+            crate::guids::parse_meta(&std::fs::read_to_string(root.join("jump.wav.meta")).unwrap()),
+            Some(guid.clone())
+        );
+        app.document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create entity");
+        app.document
+            .apply(EditorCommand::AddComponent {
+                id: 1,
+                component: Component::Audio {
+                    asset: "jump.wav".to_owned(),
+                    volume: 0.5,
+                    autoplay: false,
+                },
+            })
+            .expect("add audio");
+        let history = app.document.undo_len();
+
+        std::fs::rename(root.join("jump.wav"), root.join("moved.wav")).unwrap();
+        std::fs::rename(root.join("jump.wav.meta"), root.join("moved.wav.meta")).unwrap();
+        app.assets.reload(&ctx);
+        app.rebuild_guids();
+        let (rewritten, broken) = app.rewrite_asset_paths();
+
+        assert_eq!(rewritten, 1);
+        assert!(broken.is_empty());
+        assert_eq!(
+            app.document.scene().entities[0].components[0].asset_path(),
+            Some("moved.wav")
+        );
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert_eq!(
+            crate::guids::parse_meta(
+                &std::fs::read_to_string(root.join("moved.wav.meta")).unwrap()
+            ),
+            Some(guid.clone())
+        );
+        assert!(
+            std::fs::read_to_string(root.join(crate::guids::INDEX_FILE))
+                .unwrap()
+                .contains(&format!("{guid}=moved.wav"))
+        );
+        app.document.undo();
+        assert_eq!(
+            app.document.scene().entities[0].components[0].asset_path(),
+            Some("jump.wav")
+        );
+        app.document.redo();
+        assert_eq!(
+            app.document.scene().entities[0].components[0].asset_path(),
+            Some("moved.wav")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unknown_asset_paths_are_reported_without_being_rewritten() {
+        let ctx = Context::default();
+        let root = temp_guid_root("broken");
+        let _ = std::fs::write(root.join("jump.wav"), b"wav");
+        let mut app = fresh_app();
+        app.assets = AssetLibrary::new(root.clone());
+        app.assets.reload(&ctx);
+        app.rebuild_guids();
+        app.document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create entity");
+        app.document
+            .apply(EditorCommand::AddComponent {
+                id: 1,
+                component: Component::Image {
+                    asset: "perdido.png".to_owned(),
+                },
+            })
+            .expect("add broken image");
+        let history = app.document.undo_len();
+
+        let (rewritten, broken) = app.rewrite_asset_paths();
+
+        assert_eq!(rewritten, 0);
+        assert_eq!(broken, ["perdido.png".to_owned()]);
+        assert_eq!(app.document.undo_len(), history);
+        assert_eq!(
+            app.document.scene().entities[0].components[0].asset_path(),
+            Some("perdido.png")
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

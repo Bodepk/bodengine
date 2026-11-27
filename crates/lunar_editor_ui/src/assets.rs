@@ -374,6 +374,8 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
     match selected {
         Some(path) => {
             ui.label(format!("Seleccionado: {path}"));
+            let guid = app.guid_index.guid_for(&path).unwrap_or("sin .meta");
+            ui.label(format!("GUID: {guid}"));
             let kind = match app.assets.kind(&path) {
                 Some(AssetKind::Image) => "imagen",
                 Some(AssetKind::Audio) => "audio",
@@ -516,6 +518,50 @@ mod tests {
             texts
                 .iter()
                 .any(|text| text.contains("Sin asset seleccionado"))
+        );
+    }
+
+    #[test]
+    fn asset_panel_shows_the_guid_of_the_selected_asset() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.assets.entries.clear();
+        app.assets.entries.push(AssetEntry {
+            path: "hero.png".to_owned(),
+            kind: AssetKind::Image,
+        });
+        app.selected_asset = Some("hero.png".to_owned());
+        let id = "0123456789abcdef0123456789abcdef";
+        app.guid_index = crate::guids::GuidIndex::from_pairs(
+            &[("hero.png".to_owned(), id.to_owned())],
+            &crate::guids::GuidIndex::default(),
+        );
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(900.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Assets").show(ctx, |ui| assets_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Assets").show(ctx, |ui| assets_ui(&mut app, ui));
+        });
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        output.textures_delta.clear();
+        assert!(
+            texts.iter().any(|text| text == &format!("GUID: {id}")),
+            "{texts:?}"
         );
     }
 }
