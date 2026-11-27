@@ -63,6 +63,10 @@ pub(crate) struct EditorApp {
     /// Portapapeles en memoria (E13): no se guarda en la escena y sobrevive a
     /// abrir otra o crear una nueva.
     clipboard: Vec<SceneEntity>,
+    /// Nombre introducido para guardar la selección como plantilla (E15).
+    pub(crate) prefab_name_buffer: String,
+    /// Copias a crear desde el menú «+ Crear» (E15), acotadas en la GUI.
+    pub(crate) prefab_instance_count: usize,
     synced_selection: Vec<u64>,
     synced_revision: u64,
     revision: u64,
@@ -142,6 +146,8 @@ impl EditorApp {
             component_edit: None,
             selection_anchor: None,
             clipboard: Vec::new(),
+            prefab_name_buffer: String::new(),
+            prefab_instance_count: crate::prefabs::clamp_instance_count(1),
             synced_selection: Vec::new(),
             synced_revision: 0,
             revision: 0,
@@ -510,6 +516,81 @@ impl EditorApp {
         self.apply(EditorCommand::PasteEntities { entities });
         if self.document.undo_len() > history {
             self.set_status(format!("Pegadas {count} entidad(es)"));
+        }
+    }
+
+    /// Guarda la selección actual como plantilla en un solo paso de undo (E15).
+    pub(crate) fn save_prefab(&mut self, name: &str) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let name = name.trim();
+        if name.is_empty() {
+            self.set_status("Escribe un nombre para la plantilla");
+            return;
+        }
+        let ids = self.document.selection().to_vec();
+        if ids.is_empty() {
+            self.set_status("Selecciona entidades para guardar una plantilla");
+            return;
+        }
+        let entities = crate::helpers::selection_entities(self.document.scene(), &ids);
+        let count = entities.len();
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::SavePrefab {
+            name: name.to_owned(),
+            entities,
+        });
+        if self.document.undo_len() > history {
+            self.prefab_name_buffer.clear();
+            self.set_status(format!(
+                "Guardada plantilla «{name}» con {count} entidad(es)"
+            ));
+        }
+    }
+
+    /// Instancia una plantilla tantas veces como indique el menú «+ Crear» (E15).
+    pub(crate) fn instantiate_prefab(&mut self, name: &str) {
+        if !self.ensure_editable() {
+            return;
+        }
+        if !crate::prefabs::prefab_names(self.document.scene())
+            .iter()
+            .any(|candidate| candidate == name)
+        {
+            self.set_status(format!("Plantilla no encontrada: {name}"));
+            return;
+        }
+        let copies = crate::prefabs::clamp_instance_count(self.prefab_instance_count);
+        let entities = crate::prefabs::instantiate(self.document.scene(), name, copies);
+        if entities.is_empty() {
+            self.set_status(format!("No se pudo instanciar «{name}»"));
+            return;
+        }
+        let created = entities.len();
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::PasteEntities { entities });
+        if self.document.undo_len() > history {
+            self.set_status(format!(
+                "Instanciada «{name}» ×{copies} ({created} entidad(es))"
+            ));
+        }
+    }
+
+    /// Borra una plantilla y deja las instancias como entidades normales (E15).
+    pub(crate) fn delete_prefab(&mut self, name: &str) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let references = crate::prefabs::count_prefab_refs(self.document.scene(), name);
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::DeletePrefab {
+            name: name.to_owned(),
+        });
+        if self.document.undo_len() > history {
+            self.set_status(format!(
+                "Borrada plantilla «{name}»; {references} referencia(s) limpiadas"
+            ));
         }
     }
 
@@ -1460,5 +1541,140 @@ mod tests {
         }
         assert_eq!(app.document.scene().entities.len(), 2);
         assert_eq!(app.clipboard.len(), 2);
+    }
+
+    fn app_with_prefab() -> EditorApp {
+        let mut app = fresh_app();
+        app.document
+            .apply(EditorCommand::CreateEntity {
+                id: 1,
+                name: Some("Escena".to_owned()),
+            })
+            .expect("create entity");
+        app.document
+            .apply(EditorCommand::SavePrefab {
+                name: "base".to_owned(),
+                entities: vec![SceneEntity::new(2)],
+            })
+            .expect("save prefab");
+        app
+    }
+
+    #[test]
+    fn saving_a_prefab_from_the_selection_uses_one_undo_step() {
+        let mut app = app_with_entities(2);
+        app.select_clicked(1, false, false);
+        app.select_clicked(2, true, false);
+        app.prefab_name_buffer = "  enemigo  ".to_owned();
+        let history = app.document.undo_len();
+
+        app.save_prefab(&app.prefab_name_buffer.clone());
+
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert_eq!(app.document.scene().prefabs.len(), 1);
+        assert_eq!(app.document.scene().prefabs[0].name, "enemigo");
+        assert_eq!(app.document.scene().prefabs[0].entities.len(), 2);
+        assert!(app.prefab_name_buffer.is_empty());
+        assert!(app.status.contains("Guardada plantilla"));
+
+        app.document.undo();
+        assert!(app.document.scene().prefabs.is_empty());
+        app.document.redo();
+        assert_eq!(app.document.scene().prefabs.len(), 1);
+    }
+
+    #[test]
+    fn saving_a_prefab_needs_a_name_and_a_selection() {
+        let mut app = app_with_entities(1);
+        app.save_prefab("   ");
+        assert!(app.status.contains("nombre"));
+        assert!(app.document.scene().prefabs.is_empty());
+
+        app.document.select(&[]);
+        app.save_prefab("sin_seleccion");
+        assert!(app.status.contains("Selecciona"));
+        assert!(app.document.scene().prefabs.is_empty());
+    }
+
+    #[test]
+    fn instantiating_a_prefab_uses_fresh_ids_and_one_undo_step() {
+        let mut app = app_with_prefab();
+        app.prefab_instance_count = 2;
+        let history = app.document.undo_len();
+
+        app.instantiate_prefab("base");
+
+        let ids: Vec<u64> = app
+            .document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![1, 2, 3]);
+        assert_eq!(app.document.selection(), &[2, 3]);
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert!(app.status.contains("Instanciada"));
+        app.document.undo();
+        assert_eq!(app.document.scene().entities.len(), 1);
+        app.document.redo();
+        assert_eq!(app.document.scene().entities.len(), 3);
+    }
+
+    #[test]
+    fn an_unknown_prefab_cannot_be_instantiated() {
+        let mut app = app_with_prefab();
+        let history = app.document.undo_len();
+        app.instantiate_prefab("inexistente");
+        assert_eq!(app.document.undo_len(), history);
+        assert_eq!(app.document.scene().entities.len(), 1);
+        assert!(app.status.contains("no encontrada"));
+    }
+
+    #[test]
+    fn deleting_a_prefab_keeps_instances_and_is_undoable() {
+        let mut app = app_with_prefab();
+        app.instantiate_prefab("base");
+        let history = app.document.undo_len();
+
+        app.delete_prefab("base");
+
+        assert!(app.document.scene().prefabs.is_empty());
+        assert_eq!(app.document.scene().entities.len(), 2);
+        assert!(
+            app.document.scene().entities[1]
+                .components
+                .iter()
+                .all(|component| !matches!(component, Component::PrefabRef { .. }))
+        );
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert!(app.status.contains("referencia(s)"));
+
+        app.document.undo();
+        assert_eq!(app.document.scene().prefabs.len(), 1);
+        assert!(
+            app.document.scene().entities[1]
+                .components
+                .iter()
+                .any(|component| matches!(component, Component::PrefabRef { .. }))
+        );
+    }
+
+    #[test]
+    fn prefab_actions_are_locked_during_play() {
+        let mut app = app_with_prefab();
+        app.select_clicked(1, false, false);
+        app.play();
+        let history = app.document.undo_len();
+
+        app.save_prefab("bloqueada");
+        app.instantiate_prefab("base");
+        app.delete_prefab("base");
+
+        assert_eq!(app.document.undo_len(), history);
+        assert!(app.document.scene().prefabs.len() == 1);
+        assert_eq!(app.document.scene().entities.len(), 1);
+        assert!(app.status.contains("Detén"));
+        app.stop_play();
     }
 }

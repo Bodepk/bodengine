@@ -17,6 +17,7 @@ mod hierarchy;
 mod inspector;
 mod layout;
 mod play;
+mod prefabs;
 mod recent;
 mod settings;
 mod shortcuts;

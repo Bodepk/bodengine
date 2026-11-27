@@ -74,16 +74,41 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
 
 pub(crate) fn hierarchy_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.heading("Jerarquía");
+    let has_selection = !app.document.selection().is_empty();
     ui.horizontal(|ui| {
         ui.menu_button("+ Crear", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Instancias:");
+                ui.add(
+                    egui::DragValue::new(&mut app.prefab_instance_count)
+                        .range(1..=crate::prefabs::MAX_INSTANCE_COUNT),
+                );
+            });
+            ui.separator();
             for template in EntityTemplate::ALL {
                 if ui.button(template.label()).clicked() {
                     app.create_from_template(template);
                     ui.close();
                 }
             }
+            let prefabs = crate::prefabs::prefab_names(app.document.scene());
+            if !prefabs.is_empty() {
+                ui.separator();
+                for name in prefabs {
+                    let size = crate::prefabs::prefab_entity_count(app.document.scene(), &name);
+                    ui.horizontal(|ui| {
+                        if ui.button(format!("Instanciar: {name} ({size})")).clicked() {
+                            app.instantiate_prefab(&name);
+                            ui.close();
+                        }
+                        if ui.button("×").clicked() {
+                            app.delete_prefab(&name);
+                            ui.close();
+                        }
+                    });
+                }
+            }
         });
-        let has_selection = !app.document.selection().is_empty();
         let can_paste = app.has_clipboard();
         ui.menu_button("Editar", |ui| {
             if ui
@@ -120,6 +145,23 @@ pub(crate) fn hierarchy_ui(app: &mut EditorApp, ui: &mut Ui) {
             .clicked()
         {
             app.delete_selected();
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut app.prefab_name_buffer)
+                .hint_text("Nombre del prefab")
+                .desired_width(110.0),
+        );
+        if ui
+            .add_enabled(
+                has_selection && !app.prefab_name_buffer.trim().is_empty(),
+                Button::new("Guardar prefab"),
+            )
+            .clicked()
+        {
+            let name = app.prefab_name_buffer.clone();
+            app.save_prefab(&name);
         }
     });
     ui.separator();
@@ -262,5 +304,9 @@ mod tests {
             })
             .collect();
         assert!(texts.iter().any(|text| text == "Editar"), "{texts:?}");
+        assert!(
+            texts.iter().any(|text| text == "Guardar prefab"),
+            "{texts:?}"
+        );
     }
 }

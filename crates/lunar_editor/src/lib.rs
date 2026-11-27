@@ -4,12 +4,12 @@
 //! y un historial de comandos. Toda mutación se valida con las reglas de
 //! ADR-008 antes de entrar en el historial.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::path::Path;
 
-use lunar_scenes::{Component, Scene, SceneEntity, SceneError, Transform};
+use lunar_scenes::{Component, Prefab, Scene, SceneEntity, SceneError, Transform};
 
 /// Errores del documento de editor, sin exponer `serde_json` ni `std::io`.
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +80,13 @@ pub enum EditorCommand {
     },
     /// Inserta entidades del portapapeles con ids ya remapeados (E13).
     PasteEntities { entities: Vec<SceneEntity> },
+    /// Guarda la selección como plantilla reutilizable (E15, ADR-035).
+    SavePrefab {
+        name: String,
+        entities: Vec<SceneEntity>,
+    },
+    /// Borra una plantilla y limpia sus referencias (E15, ADR-035).
+    DeletePrefab { name: String },
     /// Aplica varias transformaciones como una sola operación (E12).
     ///
     /// Es la forma en que un arrastre con multi-selección produce un único
@@ -397,6 +404,33 @@ fn mutate(
             scene.entities.extend(entities.iter().cloned());
             *selection = ids;
         }
+        EditorCommand::SavePrefab { name, entities } => {
+            if scene.prefabs.iter().any(|prefab| prefab.name == *name) {
+                return Err(SceneError::DuplicatePrefab(name.clone()).into());
+            }
+            let mut ids = HashSet::with_capacity(entities.len());
+            for entity in entities {
+                if !ids.insert(entity.id) {
+                    return Err(SceneError::DuplicateEntity(entity.id).into());
+                }
+            }
+            scene.prefabs.push(Prefab {
+                name: name.clone(),
+                entities: entities.clone(),
+            });
+        }
+        EditorCommand::DeletePrefab { name } => {
+            let position = scene
+                .prefabs
+                .iter()
+                .position(|prefab| prefab.name == *name)
+                .ok_or_else(|| SceneError::UnknownPrefab(name.clone()))?;
+            scene.prefabs.remove(position);
+            strip_prefab_refs(&mut scene.entities, name);
+            for prefab in &mut scene.prefabs {
+                strip_prefab_refs(&mut prefab.entities, name);
+            }
+        }
         EditorCommand::SetTransforms { transforms } => {
             // `scene` ya es una copia: validamos todos los ids antes de escribir
             // para que un lote inválido no deje una escena a medias.
@@ -409,6 +443,16 @@ fn mutate(
         }
     }
     Ok(())
+}
+
+/// Elimina las referencias a una plantilla borrada para que las instancias
+/// existentes sigan pasando la validación de ADR-027.
+fn strip_prefab_refs(entities: &mut [SceneEntity], name: &str) {
+    for entity in entities {
+        entity
+            .components
+            .retain(|component| !matches!(component, Component::PrefabRef { name: referenced } if referenced == name));
+    }
 }
 
 /// Primer ancestro que sobrevive al lote de borrado, o `None` si no hay ninguno.
@@ -1129,5 +1173,141 @@ mod tests {
         assert_eq!(document.scene(), &before);
         assert_eq!(document.undo_len(), history);
         assert!(!document.redo());
+    }
+
+    #[test]
+    fn saving_a_prefab_is_one_undoable_step() {
+        let mut document = chain_with_names();
+        let history = document.undo_len();
+        let root = document.scene().entities[0].clone();
+        let child = document.scene().entities[1].clone();
+
+        document
+            .apply(EditorCommand::SavePrefab {
+                name: "enemigo".to_owned(),
+                entities: vec![root, child],
+            })
+            .expect("save prefab");
+
+        assert_eq!(document.undo_len(), history + 1);
+        assert_eq!(document.scene().prefabs.len(), 1);
+        assert_eq!(document.scene().prefabs[0].name, "enemigo");
+        assert_eq!(document.scene().prefabs[0].entities.len(), 2);
+        assert_eq!(document.scene().prefabs[0].entities[1].parent, Some(1));
+
+        assert!(document.undo());
+        assert!(document.scene().prefabs.is_empty());
+        assert!(document.redo());
+        assert_eq!(document.scene().prefabs.len(), 1);
+    }
+
+    #[test]
+    fn an_invalid_prefab_leaves_the_scene_untouched() {
+        let mut document = chain_with_names();
+        let before = document.scene().clone();
+        let history = document.undo_len();
+        let entities = vec![document.scene().entities[0].clone()];
+
+        document
+            .apply(EditorCommand::SavePrefab {
+                name: "enemigo".to_owned(),
+                entities: entities.clone(),
+            })
+            .expect("first prefab");
+
+        let with_prefab = document.scene().clone();
+        assert_eq!(
+            document.apply(EditorCommand::SavePrefab {
+                name: "enemigo".to_owned(),
+                entities: entities.clone(),
+            }),
+            Err(SceneError::DuplicatePrefab("enemigo".to_owned()).into())
+        );
+        assert_eq!(document.scene(), &with_prefab);
+
+        assert_eq!(
+            document.apply(EditorCommand::SavePrefab {
+                name: "roto".to_owned(),
+                entities: vec![SceneEntity::new(7), SceneEntity::new(7)],
+            }),
+            Err(SceneError::DuplicateEntity(7).into())
+        );
+        let mut cyclic = SceneEntity::new(8);
+        cyclic.components.push(Component::PrefabRef {
+            name: "ciclo".to_owned(),
+        });
+        assert_eq!(
+            document.apply(EditorCommand::SavePrefab {
+                name: "ciclo".to_owned(),
+                entities: vec![cyclic],
+            }),
+            Err(SceneError::PrefabCycle("ciclo".to_owned()).into())
+        );
+        assert_eq!(document.scene(), &with_prefab);
+        assert_eq!(document.scene().entities, before.entities);
+        assert_eq!(document.undo_len(), history + 1);
+    }
+
+    #[test]
+    fn deleting_a_prefab_strips_references_and_undo_restores_them() {
+        let mut document = EditorDocument::new();
+        document
+            .apply(EditorCommand::CreateEntity {
+                id: 1,
+                name: Some("Instancia".to_owned()),
+            })
+            .expect("create instance");
+        document
+            .apply(EditorCommand::SavePrefab {
+                name: "base".to_owned(),
+                entities: vec![SceneEntity::new(2)],
+            })
+            .expect("save base");
+        document
+            .apply(EditorCommand::AddComponent {
+                id: 1,
+                component: Component::PrefabRef {
+                    name: "base".to_owned(),
+                },
+            })
+            .expect("add ref");
+        let history = document.undo_len();
+
+        document
+            .apply(EditorCommand::DeletePrefab {
+                name: "base".to_owned(),
+            })
+            .expect("delete base");
+
+        assert!(document.scene().prefabs.is_empty());
+        assert!(document.scene().entities[0].components.is_empty());
+        assert_eq!(document.undo_len(), history + 1);
+
+        assert!(document.undo());
+        assert_eq!(document.scene().prefabs.len(), 1);
+        assert_eq!(
+            document.scene().entities[0].components,
+            vec![Component::PrefabRef {
+                name: "base".to_owned()
+            }]
+        );
+        assert!(document.redo());
+        assert!(document.scene().prefabs.is_empty());
+    }
+
+    #[test]
+    fn deleting_an_unknown_prefab_is_rejected() {
+        let mut document = chain_with_names();
+        let before = document.scene().clone();
+        let history = document.undo_len();
+
+        assert_eq!(
+            document.apply(EditorCommand::DeletePrefab {
+                name: "inexistente".to_owned(),
+            }),
+            Err(SceneError::UnknownPrefab("inexistente".to_owned()).into())
+        );
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), history);
     }
 }

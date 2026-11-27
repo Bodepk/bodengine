@@ -28,6 +28,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - E12 del editor: multi-selección compartida entre jerarquía y viewport (clic reemplaza, Ctrl alterna, Shift amplía el rango en orden jerárquico), caja de selección 2D con un único tirador de movimiento de grupo y comandos atómicos `SetTransforms` y `DeleteEntities`, de modo que arrastrar o borrar N entidades deja una sola entrada de undo.
 - E13 del editor: menú «Editar» con duplicar/copiar/cortar/pegar y atajos `Ctrl+D`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V`; duplicar y pegar N entidades son comandos atómicos (`DuplicateEntities`/`PasteEntities`) con ids nuevos y jerarquía interna remapeada, y el portapapeles sobrevive a abrir otra escena.
 - E14 del editor: gizmo único para toda la selección en 2D y 3D, con selector Global/Local (`Q`, persistido en preferencias). En Global el origen es el centro del grupo y los ejes son del mundo; en Local es el origen de la entidad ancla y los ejes giran con ella. Rotar y escalar grupos en 2D y trasladar grupos en 3D dejan una sola entrada de undo.
+- E15 del editor y ADR-035: guardar la selección como prefab con su jerarquía, instanciar de una a diez copias con ids nuevos, procedencia `PrefabRef` y borrado de plantillas que limpia referencias sin romper las instancias; guardar, instanciar y borrar son comandos atómicos con undo.
 
 ### Cambiado
 
