@@ -15,6 +15,7 @@ mod gizmo;
 mod guids;
 mod helpers;
 mod hierarchy;
+mod import_options;
 mod inspector;
 mod layout;
 mod play;

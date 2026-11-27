@@ -84,6 +84,7 @@ pub(crate) fn level_for(message: &str) -> Level {
     } else if lower.starts_with("aviso")
         || lower.starts_with("confirma")
         || lower.contains("sin guardar")
+        || lower.contains("referencia(s) rota(s)")
     {
         Level::Warn
     } else {
@@ -96,6 +97,19 @@ pub(crate) fn level_for(message: &str) -> Level {
 /// conservan como máximo `MAX_LOG` entradas.
 pub(crate) fn push(entries: &mut Vec<LogEntry>, message: impl Into<String>, elapsed: f32) {
     let message = message.into();
+    let level = level_for(&message);
+    push_level(entries, level, message, elapsed);
+}
+
+/// Igual que `push`, pero con severidad explícita: los errores de comandos y
+/// las opciones inválidas no dependen de heurísticas sobre el texto.
+pub(crate) fn push_level(
+    entries: &mut Vec<LogEntry>,
+    level: Level,
+    message: impl Into<String>,
+    elapsed: f32,
+) {
+    let message = message.into();
     if message.is_empty() {
         return;
     }
@@ -106,7 +120,7 @@ pub(crate) fn push(entries: &mut Vec<LogEntry>, message: impl Into<String>, elap
         return;
     }
     entries.push(LogEntry {
-        level: level_for(&message),
+        level,
         message,
         elapsed,
         count: 1,
@@ -429,6 +443,10 @@ mod tests {
         assert_eq!(level_for("Asset no cargado: x.png"), Level::Error);
         assert_eq!(level_for("Confirma cómo guardar"), Level::Warn);
         assert_eq!(level_for("● sin guardar"), Level::Warn);
+        assert_eq!(
+            level_for("Recargada bibliografía; 2 referencia(s) rota(s)"),
+            Level::Warn
+        );
     }
 
     #[test]

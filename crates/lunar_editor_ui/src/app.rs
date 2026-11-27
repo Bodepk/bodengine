@@ -13,6 +13,7 @@ use crate::helpers::{
     audio_component, collider2_component, hierarchy_ids, image_component, next_entity_id,
     range_ids, toggle_selection, union_selection,
 };
+use crate::import_options::{ImportOptions, ReimportWatcher};
 use crate::layout;
 use crate::play::{PlayState, dynamic_ids, floor_y, step_vertical};
 use crate::recent;
@@ -84,6 +85,11 @@ pub(crate) struct EditorApp {
     pub(crate) asset_folder: String,
     pub(crate) asset_kind_filter: Option<AssetKind>,
     pub(crate) selected_asset: Option<String>,
+    /// Opciones del asset seleccionado y ruta a la que pertenecen (E17).
+    pub(crate) asset_options: ImportOptions,
+    asset_options_path: Option<String>,
+    /// Sondeo cooperativo de huellas en disco (E17, ADR-036).
+    reimport: ReimportWatcher,
     pub(crate) view_mode: ViewMode,
     pub(crate) camera3d: Camera3D,
     pub(crate) view3d_drag: Drag3D,
@@ -135,6 +141,9 @@ impl EditorApp {
             status = error.clone();
         }
         let guid_index = crate::guids::load(&assets.root, &assets.entries);
+        let mut reimport = ReimportWatcher::default();
+        let samples = crate::import_options::sample(&assets.root, &assets.entries);
+        let _ = reimport.poll(&samples, 0, 0);
 
         Self {
             document,
@@ -167,6 +176,9 @@ impl EditorApp {
             asset_folder: String::new(),
             asset_kind_filter: None,
             selected_asset: None,
+            asset_options: ImportOptions::default(),
+            asset_options_path: None,
+            reimport,
             view_mode: ViewMode::default(),
             camera3d: Camera3D::default(),
             view3d_drag: Drag3D::default(),
@@ -197,6 +209,19 @@ impl EditorApp {
         let message = message.into();
         let elapsed = self.start_time.elapsed().as_secs_f32();
         crate::status::push(&mut self.status_log, message.clone(), elapsed);
+        self.status = message;
+    }
+
+    /// Mensaje con severidad elegida explícitamente (errores de consola, avisos
+    /// de reimportado y opciones de asset inválidas).
+    pub(crate) fn set_status_level(
+        &mut self,
+        level: crate::status::Level,
+        message: impl Into<String>,
+    ) {
+        let message = message.into();
+        let elapsed = self.start_time.elapsed().as_secs_f32();
+        crate::status::push_level(&mut self.status_log, level, message.clone(), elapsed);
         self.status = message;
     }
 
@@ -681,6 +706,78 @@ impl EditorApp {
         self.save_settings();
     }
 
+    /// Carga las opciones del asset seleccionado solo cuando cambia la ruta,
+    /// para que los campos editables no se sobrescriban en cada frame.
+    pub(crate) fn refresh_asset_options(&mut self) {
+        let Some(path) = self.selected_asset.clone() else {
+            self.asset_options_path = None;
+            return;
+        };
+        if self.asset_options_path.as_deref() == Some(path.as_str()) {
+            return;
+        }
+        self.asset_options = crate::import_options::load_for(&self.assets.root, &path);
+        self.asset_options_path = Some(path);
+    }
+
+    /// Persiste las opciones en el `.meta` y recarga las miniaturas afectadas.
+    pub(crate) fn save_asset_options(&mut self, ctx: &Context) {
+        let Some(path) = self.selected_asset.clone() else {
+            return;
+        };
+        let options = self.asset_options;
+        match crate::import_options::save_for(&self.assets.root, &path, &options) {
+            Ok(()) => {
+                let changed_texture = self.assets.kind(&path) == Some(AssetKind::Image);
+                self.assets.reload(ctx);
+                self.refresh_guids();
+                self.asset_options_path = None;
+                self.refresh_asset_options();
+                let suffix = if changed_texture {
+                    " (miniatura actualizada)"
+                } else {
+                    ""
+                };
+                self.set_status(format!("Opciones guardadas en {path}.meta{suffix}"));
+            }
+            Err(error) => self.set_status_level(
+                crate::status::Level::Error,
+                format!("No se pudieron guardar opciones de {path}: {error}"),
+            ),
+        }
+    }
+
+    /// Sondeo cooperativo de cambios en disco. No crea hilos y solo muta la
+    /// escena a través de `rewrite_asset_paths` cuando una ruta resuelta cambia.
+    pub(crate) fn tick_reimport(&mut self, ctx: &Context, now_ms: u64) {
+        const INTERVAL_MS: u64 = 750;
+        let samples = crate::import_options::sample(&self.assets.root, &self.assets.entries);
+        let missing = self.reimport.missing(&samples);
+        let changed = self.reimport.poll(&samples, now_ms, INTERVAL_MS);
+        if changed.is_empty() && missing.is_empty() {
+            return;
+        }
+        self.assets.reload(ctx);
+        self.refresh_guids();
+        self.asset_options_path = None;
+        self.refresh_asset_options();
+        let (rewritten, broken) = self.rewrite_asset_paths();
+        let suffix = Self::describe_guid_changes(rewritten, &broken);
+        let message = if missing.is_empty() {
+            format!(
+                "Reimportado(s): {} asset(s) cambiado(s){suffix}",
+                changed.len()
+            )
+        } else {
+            format!(
+                "Reimportado(s): {} cambiado(s), {} desaparecido(s){suffix}",
+                changed.len(),
+                missing.len()
+            )
+        };
+        self.set_status(message);
+    }
+
     pub(crate) fn create_entity_from_asset(&mut self, asset: &str, position: [f32; 2]) {
         if !self.ensure_editable() {
             return;
@@ -707,10 +804,18 @@ impl EditorApp {
             },
         };
         self.apply(EditorCommand::AddComponent { id, component });
+        let scale = if kind == AssetKind::Mesh {
+            crate::import_options::load_for(&self.assets.root, asset)
+                .gltf
+                .scale
+        } else {
+            1.0
+        };
         self.apply(EditorCommand::SetTransform {
             id,
             transform: Transform {
                 translation: [position[0], position[1], 0.0],
+                scale: [scale; 3],
                 ..Transform::default()
             },
         });
@@ -1006,7 +1111,9 @@ impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let dt = ctx.input(|input| input.stable_dt);
+        let now_ms = (ctx.input(|input| input.time) * 1000.0) as u64;
         self.tick_play(dt);
+        self.tick_reimport(&ctx, now_ms);
         self.handle_shortcuts(&ctx);
         self.sync_inspector();
 
@@ -1860,6 +1967,26 @@ mod tests {
             app.document.scene().entities[0].components[0].asset_path(),
             Some("perdido.png")
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reimport_watcher_reports_a_missing_asset_in_the_console() {
+        let ctx = Context::default();
+        let root = temp_guid_root("reimport");
+        let file = root.join("jump.wav");
+        let _ = std::fs::write(&file, b"wav");
+        let mut app = fresh_app();
+        app.assets = AssetLibrary::new(root.clone());
+        app.assets.reload(&ctx);
+        app.rebuild_guids();
+        let samples = crate::import_options::sample(&app.assets.root, &app.assets.entries);
+        let _ = app.reimport.poll(&samples, 0, 0);
+
+        std::fs::remove_file(&file).unwrap();
+        app.tick_reimport(&ctx, 0);
+
+        assert!(app.status.contains("desaparecido(s)"), "{}", app.status);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

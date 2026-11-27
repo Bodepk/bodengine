@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use egui::{Color32, Context, Sense, TextureHandle, TextureOptions, Ui, Vec2};
+use egui::{Color32, Context, Sense, TextureHandle, Ui, Vec2};
 use lunar_assets::ImageStore;
 
 use crate::app::EditorApp;
@@ -152,7 +152,9 @@ impl AssetLibrary {
                                     [dimensions[0] as usize, dimensions[1] as usize],
                                     image.as_rgba(),
                                 ),
-                                TextureOptions::NEAREST,
+                                crate::import_options::load_for(&self.root, &path)
+                                    .texture
+                                    .egui(),
                             );
                             self.textures.insert(path.clone(), texture);
                             self.dimensions.insert(path.clone(), dimensions);
@@ -367,6 +369,7 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
     });
 
     ui.separator();
+    app.refresh_asset_options();
     let selected = app
         .selected_asset
         .clone()
@@ -385,6 +388,85 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
             ui.label(format!("Tipo: {kind}"));
             if let Some(dimensions) = app.assets.dimensions(&path) {
                 ui.label(format!("{}×{} px", dimensions[0], dimensions[1]));
+            }
+            ui.separator();
+            ui.label("Opciones de importación");
+            use crate::import_options::{TextureFilter, TextureWrap};
+            let kind = app.assets.kind(&path);
+            let mut changed = false;
+            if kind == Some(AssetKind::Image) {
+                let mut filter = app.asset_options.texture.filter;
+                let mut wrap = app.asset_options.texture.wrap;
+                ui.horizontal(|ui| {
+                    ui.label("Filtro");
+                    changed |= ui
+                        .radio_value(&mut filter, TextureFilter::Nearest, "Nearest")
+                        .clicked();
+                    changed |= ui
+                        .radio_value(&mut filter, TextureFilter::Linear, "Linear")
+                        .clicked();
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Wrap");
+                    changed |= ui
+                        .radio_value(&mut wrap, TextureWrap::Clamp, "Clamp")
+                        .clicked();
+                    changed |= ui
+                        .radio_value(&mut wrap, TextureWrap::Repeat, "Repeat")
+                        .clicked();
+                    changed |= ui
+                        .radio_value(&mut wrap, TextureWrap::Mirror, "Mirror")
+                        .clicked();
+                });
+                app.asset_options.texture.filter = filter;
+                app.asset_options.texture.wrap = wrap;
+            } else if kind == Some(AssetKind::Mesh) {
+                let mut scale = app.asset_options.gltf.scale;
+                ui.horizontal(|ui| {
+                    changed |= ui
+                        .add(
+                            egui::DragValue::new(&mut scale)
+                                .speed(0.05)
+                                .range(0.01..=100.0),
+                        )
+                        .on_hover_text("Escala glTF")
+                        .changed();
+                    ui.label("Escala glTF");
+                });
+                changed |= ui
+                    .checkbox(&mut app.asset_options.gltf.materials, "Materiales")
+                    .clicked();
+                changed |= ui
+                    .checkbox(&mut app.asset_options.gltf.animations, "Animaciones")
+                    .clicked();
+                app.asset_options.gltf.scale = scale;
+            } else if kind == Some(AssetKind::Audio) {
+                let mut channels = app.asset_options.audio.channels;
+                let mut rate = app.asset_options.audio.sample_rate;
+                ui.horizontal(|ui| {
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut channels).speed(1.0).range(1..=2))
+                        .on_hover_text("Canales")
+                        .changed();
+                    ui.label("Canales");
+                });
+                ui.horizontal(|ui| {
+                    changed |= ui
+                        .add(
+                            egui::DragValue::new(&mut rate)
+                                .speed(100.0)
+                                .range(8_000..=192_000),
+                        )
+                        .on_hover_text("Sample rate")
+                        .changed();
+                    ui.label("Sample rate");
+                });
+                app.asset_options.audio.channels = channels;
+                app.asset_options.audio.sample_rate = rate;
+            }
+            if changed {
+                let ctx = ui.ctx().clone();
+                app.save_asset_options(&ctx);
             }
             if ui.button("Crear en el centro").clicked() {
                 let center = app.view_center;
@@ -563,5 +645,62 @@ mod tests {
             texts.iter().any(|text| text == &format!("GUID: {id}")),
             "{texts:?}"
         );
+    }
+
+    fn rendered_asset_panel(app: &mut EditorApp, ctx: &Context) -> Vec<String> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(900.0, 700.0),
+            )),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Assets").show(ctx, |ui| assets_ui(app, ui));
+        });
+        first.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Assets").show(ctx, |ui| assets_ui(app, ui));
+        });
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        output.textures_delta.clear();
+        texts
+    }
+
+    #[test]
+    fn asset_panel_shows_import_options_for_the_selected_kind() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.assets.entries.clear();
+        app.assets.entries.push(AssetEntry {
+            path: "hero.png".to_owned(),
+            kind: AssetKind::Image,
+        });
+        app.selected_asset = Some("hero.png".to_owned());
+        let texts = rendered_asset_panel(&mut app, &ctx);
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("Opciones de importación"))
+        );
+        assert!(texts.iter().any(|text| text.contains("Filtro")));
+        assert!(texts.iter().any(|text| text.contains("Wrap")));
+
+        app.assets.entries.clear();
+        app.assets.entries.push(AssetEntry {
+            path: "ship.glb".to_owned(),
+            kind: AssetKind::Mesh,
+        });
+        app.selected_asset = Some("ship.glb".to_owned());
+        let texts = rendered_asset_panel(&mut app, &ctx);
+        assert!(texts.iter().any(|text| text.contains("Escala glTF")));
+        assert!(texts.iter().any(|text| text.contains("Materiales")));
     }
 }
