@@ -126,6 +126,58 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
         });
 
     ui.separator();
+    ui.heading("Material (ADR-047)");
+    let paths = app.material_library.paths();
+    let current = app.material_map.get(id).map(str::to_owned);
+    let mut next = current.clone();
+    egui::ComboBox::from_label("Asignado")
+        .selected_text(current.as_deref().unwrap_or("Sin material"))
+        .width(180.0)
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_label(current.is_none(), "Sin material")
+                .clicked()
+            {
+                next = None;
+            }
+            for path in &paths {
+                if ui
+                    .selectable_label(current.as_deref() == Some(path.as_str()), path)
+                    .clicked()
+                {
+                    next = Some(path.clone());
+                }
+            }
+        });
+    if next != current {
+        app.assign_material_to_selection(next.as_deref());
+    }
+    if let Some(path) = app.material_map.get(id) {
+        match app.material_library.get(path) {
+            Some(material) => {
+                ui.horizontal(|ui| {
+                    material.preview_ui(ui);
+                    ui.vertical(|ui| {
+                        ui.label(format!("64×64 px · {path}"));
+                        ui.colored_label(
+                            egui::Color32::from_gray(150),
+                            "Previsualización CPU; no se aplica al runtime",
+                        );
+                    });
+                });
+            }
+            None => {
+                ui.colored_label(
+                    egui::Color32::RED,
+                    format!("Material no disponible: {path}"),
+                );
+            }
+        }
+    } else {
+        ui.label("Sin material asignado");
+    }
+
+    ui.separator();
     ui.heading("Componentes");
     let mut remove_index = None;
     for (index, component) in entity.components.iter().enumerate() {
@@ -325,6 +377,67 @@ mod tests {
                 .any(|text| text.contains("2 entidades seleccionadas")),
             "{texts:?}"
         );
+    }
+
+    #[test]
+    fn inspector_shows_the_assigned_material_and_its_64px_preview() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document
+            .apply(EditorCommand::CreateEntity { id: 1, name: None })
+            .expect("create entity");
+        app.material_library.insert(
+            "piedra.material.json".to_owned(),
+            crate::materials::Material::default(),
+        );
+        app.material_map
+            .set(1, Some("piedra.material.json".to_owned()));
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut second = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        second.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Inspector").show(ctx, |ui| inspector_ui(&mut app, ui));
+        });
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        let rects: Vec<Rect> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) => Some(shape.rect),
+                _ => None,
+            })
+            .collect();
+        output.textures_delta.clear();
+        assert!(
+            texts.iter().any(|text| text == "Material (ADR-047)"),
+            "{texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("Previsualización CPU")),
+            "{texts:?}"
+        );
+        assert!(rects.iter().any(|rect| {
+            (rect.width() - crate::materials::PREVIEW_SIZE).abs() < 0.01
+                && (rect.height() - crate::materials::PREVIEW_SIZE).abs() < 0.01
+        }));
     }
 
     #[test]

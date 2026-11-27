@@ -21,6 +21,7 @@ mod history;
 mod import_options;
 mod inspector;
 mod layout;
+mod materials;
 mod play;
 mod prefabs;
 mod recent;

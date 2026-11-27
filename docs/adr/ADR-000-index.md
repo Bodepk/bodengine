@@ -63,6 +63,8 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [044](ADR-044-persistencia-vistas-editor.md) | Persistencia del sombreado 3D y de la vista de assets | Aceptada |
 | [045](ADR-045-historial-editor.md) | Historial de undo/redo con etiquetas | Aceptada |
 | [046](ADR-046-validacion-escena-editor.md) | Validación de escena en el editor | Aceptada |
+| [047](ADR-047-materiales-pbr-editor.md) | Materiales PBR editor-owned y previsualización CPU | Aceptada |
+| [048](ADR-048-fuera-fase-shaders-gpu.md) | Fuera de Fase 3: shader graph, shaders de usuario y PBR GPU | Aceptada |
 
 ## Consecuencias
 

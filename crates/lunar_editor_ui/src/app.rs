@@ -15,6 +15,7 @@ use crate::helpers::{
 };
 use crate::import_options::{ImportOptions, ReimportWatcher};
 use crate::layout;
+use crate::materials::{MAP_FILE as MATERIAL_MAP_FILE, Material, MaterialLibrary, MaterialMap};
 use crate::play::{PlayState, dynamic_ids, floor_y, step_vertical};
 use crate::recent;
 use crate::status::{ConsoleFilter, LogEntry};
@@ -44,6 +45,13 @@ pub(crate) struct ComponentEdit {
     pub(crate) id: u64,
     pub(crate) index: usize,
     pub(crate) component: Component,
+}
+
+/// Estado completo de los sidecars de material en un punto del historial (E47).
+#[derive(Debug, Clone, PartialEq)]
+struct MaterialSnapshot {
+    library: MaterialLibrary,
+    map: MaterialMap,
 }
 
 #[derive(Debug)]
@@ -111,6 +119,13 @@ pub(crate) struct EditorApp {
     script_map_stamp: u64,
     script_diag_stamp: u64,
     script_last_poll: u64,
+    /// Materiales editor-owned y su asignación por entidad (E47, ADR-047).
+    pub(crate) material_library: MaterialLibrary,
+    pub(crate) material_map: MaterialMap,
+    material_undo: Vec<MaterialSnapshot>,
+    material_redo: Vec<MaterialSnapshot>,
+    material_map_stamp: u64,
+    pub(crate) material_name_buffer: String,
     pub(crate) view_mode: ViewMode,
     /// Relleno de la vista 3D (ADR-037); no se persiste, como la cámara.
     pub(crate) shading_mode: crate::view3d::ShadingMode,
@@ -218,6 +233,12 @@ impl EditorApp {
             script_map_stamp: 0,
             script_diag_stamp: 0,
             script_last_poll: 0,
+            material_library: MaterialLibrary::default(),
+            material_map: MaterialMap::default(),
+            material_undo: Vec::new(),
+            material_redo: Vec::new(),
+            material_map_stamp: 0,
+            material_name_buffer: String::new(),
             view_mode: ViewMode::default(),
             shading_mode: settings.shading_mode,
             camera3d: Camera3D::default(),
@@ -242,6 +263,7 @@ impl EditorApp {
             recent: recent::load(),
         };
         app.load_scripts();
+        app.load_materials();
         app
     }
 
@@ -271,6 +293,175 @@ impl EditorApp {
             self.set_status_level(crate::status::Level::Error, error);
         }
         self.load_script_diagnostics();
+    }
+
+    /// Ruta del fichero lateral de materiales junto a la escena actual.
+    pub(crate) fn material_map_path(&self) -> PathBuf {
+        Self::sidecar_path(&self.path, MATERIAL_MAP_FILE)
+    }
+
+    /// Lee materiales y asignaciones sin mutar la escena (E47, ADR-047).
+    pub(crate) fn load_materials(&mut self) {
+        self.material_library = MaterialLibrary::load(&self.assets.root);
+        let path = self.material_map_path();
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        self.material_map = MaterialMap::decode(&text);
+        let ids: Vec<u64> = self
+            .document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        self.material_map.retain(&ids);
+        self.material_map_stamp = crate::import_options::stamp(&path);
+        self.material_undo.clear();
+        self.material_redo.clear();
+    }
+
+    fn write_materials_for(&mut self, path: &Path) -> Result<(), String> {
+        let sidecar = Self::sidecar_path(path, MATERIAL_MAP_FILE);
+        match crate::scripts::atomic_write(&sidecar, &self.material_map.encode()) {
+            Ok(()) => {
+                self.material_map_stamp = crate::import_options::stamp(&sidecar);
+                Ok(())
+            }
+            Err(error) => Err(format!("No se pudo guardar {}: {error}", sidecar.display())),
+        }
+    }
+
+    fn material_snapshot(&self) -> MaterialSnapshot {
+        MaterialSnapshot {
+            library: self.material_library.clone(),
+            map: self.material_map.clone(),
+        }
+    }
+
+    fn restore_materials(&mut self, snapshot: MaterialSnapshot) {
+        let previous = self.material_snapshot();
+        self.material_library = snapshot.library;
+        self.material_map = snapshot.map;
+        if previous.library != self.material_library
+            && let Err(error) = self
+                .material_library
+                .sync_to_disk(&self.assets.root, &previous.library)
+        {
+            self.set_status_level(crate::status::Level::Error, error);
+        }
+        if let Err(error) = self.write_materials_for(&self.path.clone()) {
+            self.set_status_level(crate::status::Level::Error, error);
+        }
+    }
+
+    /// Asigna el material seleccionado a la primera entidad seleccionada.
+    /// El cambio queda apareado a un paso del historial y es deshacible.
+    pub(crate) fn assign_material_to_selection(&mut self, path: Option<&str>) {
+        if !self.ensure_editable() {
+            return;
+        }
+        if let Some(path) = path
+            && self.material_library.get(path).is_none()
+        {
+            self.set_status(format!("Material no cargado: {path}"));
+            return;
+        }
+        let Some(id) = self.document.selection().first().copied() else {
+            self.set_status("Selecciona una entidad para asignar el material");
+            return;
+        };
+        if self.material_map.get(id) == path {
+            return;
+        }
+        let previous = self.material_snapshot();
+        if self.try_apply(EditorCommand::MaterialEdit).is_err() {
+            return;
+        }
+        self.material_undo.push(previous);
+        self.material_redo.clear();
+        self.material_map.set(id, path.map(str::to_owned));
+        if let Err(error) = self.write_materials_for(&self.path.clone()) {
+            self.set_status_level(crate::status::Level::Error, error);
+            return;
+        }
+        self.set_status(match path {
+            Some(path) => format!("Material {path} asignado a #{id}"),
+            None => format!("Material retirado de #{id}"),
+        });
+    }
+
+    pub(crate) fn commit_material_edit(&mut self, path: &str, material: Material) {
+        if !self.ensure_editable() {
+            return;
+        }
+        if self.material_library.get(path) == Some(&material) {
+            return;
+        }
+        let previous = self.material_snapshot();
+        if self.try_apply(EditorCommand::MaterialEdit).is_err() {
+            return;
+        }
+        self.material_undo.push(previous);
+        self.material_redo.clear();
+        self.material_library.insert(path.to_owned(), material);
+        if let Err(error) = self.material_library.save(&self.assets.root, path) {
+            self.set_status_level(
+                crate::status::Level::Error,
+                format!("No se pudo guardar {path}: {error}"),
+            );
+            return;
+        }
+        self.set_status(format!("Material guardado: {path}"));
+    }
+
+    /// Crea un material con nombre seguro y le asigna GUID mediante `.meta`.
+    pub(crate) fn create_material(&mut self, ctx: &Context) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let stem: String = self
+            .material_name_buffer
+            .trim()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if stem.is_empty() {
+            self.set_status("Escribe un nombre para el material");
+            return;
+        }
+        let path = format!("{stem}{}", crate::materials::MATERIAL_SUFFIX);
+        if self.material_library.get(&path).is_some() {
+            self.set_status(format!("Ya existe el material {path}"));
+            return;
+        }
+        let material = Material {
+            name: stem.clone(),
+            ..Material::default()
+        };
+        let previous = self.material_snapshot();
+        if self.try_apply(EditorCommand::MaterialEdit).is_err() {
+            return;
+        }
+        self.material_undo.push(previous);
+        self.material_redo.clear();
+        self.material_library.insert(path.clone(), material);
+        if let Err(error) = self.material_library.save(&self.assets.root, &path) {
+            self.set_status_level(
+                crate::status::Level::Error,
+                format!("No se pudo crear {path}: {error}"),
+            );
+            return;
+        }
+        self.assets.reload(ctx);
+        self.rebuild_guids();
+        self.selected_asset = Some(path.clone());
+        self.material_name_buffer.clear();
+        self.set_status(format!("Creado {path}"));
     }
 
     fn load_script_diagnostics(&mut self) {
@@ -400,6 +591,7 @@ impl EditorApp {
                     .map(|entity| entity.id)
                     .collect();
                 self.script_map.retain(&ids);
+                self.material_map.retain(&ids);
                 Ok(())
             }
             Err(error) => {
@@ -471,6 +663,11 @@ impl EditorApp {
                 self.script_redo
                     .push(std::mem::replace(&mut self.script_map, previous));
             }
+            if let Some(previous) = self.material_undo.pop() {
+                let current = self.material_snapshot();
+                self.material_redo.push(current);
+                self.restore_materials(previous);
+            }
             self.revision += 1;
             self.set_status("");
         } else {
@@ -486,6 +683,11 @@ impl EditorApp {
             if let Some(next) = self.script_redo.pop() {
                 self.script_undo
                     .push(std::mem::replace(&mut self.script_map, next));
+            }
+            if let Some(next) = self.material_redo.pop() {
+                let current = self.material_snapshot();
+                self.material_undo.push(current);
+                self.restore_materials(next);
             }
             self.revision += 1;
             self.set_status("");
@@ -556,6 +758,7 @@ impl EditorApp {
                 self.drag = CanvasDrag::None;
                 self.revision += 1;
                 self.load_scripts();
+                self.load_materials();
                 self.refresh_guids();
                 let (rewritten, broken) = self.rewrite_asset_paths();
                 let suffix = Self::describe_guid_changes(rewritten, &broken);
@@ -629,7 +832,10 @@ impl EditorApp {
         match self.document.save_to_path(&path) {
             Ok(()) => {
                 self.path = path.clone();
-                match self.write_scripts_for(&path) {
+                match self
+                    .write_scripts_for(&path)
+                    .and_then(|()| self.write_materials_for(&path))
+                {
                     Ok(()) => {
                         self.set_status(format!("Guardada {path:?}{suffix}"));
                         self.remember(path);
@@ -665,6 +871,7 @@ impl EditorApp {
             Ok(()) => {
                 self.path = target.clone();
                 self.write_scripts_for(&target)?;
+                self.write_materials_for(&target)?;
                 self.remember(target.clone());
                 Ok(format!("Guardada {target:?}{suffix}"))
             }
@@ -692,6 +899,7 @@ impl EditorApp {
                 self.drag = CanvasDrag::None;
                 self.revision += 1;
                 self.load_scripts();
+                self.load_materials();
                 self.refresh_guids();
                 let (rewritten, broken) = self.rewrite_asset_paths();
                 let suffix = Self::describe_guid_changes(rewritten, &broken);
@@ -739,6 +947,10 @@ impl EditorApp {
         self.script_redo.clear();
         self.script_map_stamp = 0;
         self.script_diag_stamp = 0;
+        self.material_map = crate::materials::MaterialMap::default();
+        self.material_undo.clear();
+        self.material_redo.clear();
+        self.material_map_stamp = 0;
         self.selection_anchor = None;
         self.preview.clear();
         self.drag = CanvasDrag::None;
@@ -1025,6 +1237,7 @@ impl EditorApp {
         self.assets = AssetLibrary::new(PathBuf::from(&self.assets_root_text));
         self.assets.reload(ctx);
         self.rebuild_guids();
+        self.load_materials();
         let (rewritten, broken) = self.rewrite_asset_paths();
         let suffix = Self::describe_guid_changes(rewritten, &broken);
         let status = match &self.assets.error {
@@ -1120,6 +1333,10 @@ impl EditorApp {
             self.set_status(format!("Asset no cargado: {asset}"));
             return;
         };
+        if kind == AssetKind::Material {
+            self.assign_material_to_selection(Some(asset));
+            return;
+        }
         let id = next_entity_id(self.document.scene());
         let name = PathBuf::from(asset)
             .file_stem()
@@ -1136,6 +1353,7 @@ impl EditorApp {
                 asset: normalize_asset_path(asset),
                 primitive: None,
             },
+            AssetKind::Material => unreachable!("los materiales se asignan arriba"),
         };
         self.apply(EditorCommand::AddComponent { id, component });
         let scale = if kind == AssetKind::Mesh {
@@ -1175,6 +1393,7 @@ impl EditorApp {
                         AssetKind::Image => "imagen",
                         AssetKind::Audio => "audio",
                         AssetKind::Mesh => "malla",
+                        AssetKind::Material => "material",
                     };
                     self.set_status(format!(
                         "No hay asset de {} en {}",
@@ -1190,6 +1409,7 @@ impl EditorApp {
                         asset: normalize_asset_path(&asset),
                         primitive: None,
                     },
+                    AssetKind::Material => unreachable!("ninguna plantilla crea materiales"),
                 })
             }
             None => match template {
@@ -1557,6 +1777,72 @@ mod tests {
         app.document = EditorDocument::new();
         app.assets.entries.clear();
         app
+    }
+
+    #[test]
+    fn material_assignment_is_undoable_and_written_to_sidecar() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_mat_app_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.assets.root = root.clone();
+        app.path = root.join("scene.json");
+        app.document = EditorDocument::new();
+        app.apply(EditorCommand::CreateEntity { id: 1, name: None });
+        app.material_library
+            .insert("m.material.json".to_owned(), Material::default());
+
+        app.assign_material_to_selection(Some("m.material.json"));
+        assert_eq!(app.material_map.get(1), Some("m.material.json"));
+        let sidecar = std::fs::read_to_string(app.material_map_path()).expect("sidecar");
+        assert!(sidecar.contains("1=m.material.json"), "{sidecar}");
+        assert!(app.document.can_undo());
+        assert_eq!(EditorCommand::MaterialEdit.label(), "Editar material");
+
+        app.undo();
+        assert_eq!(app.material_map.get(1), None);
+        let sidecar = std::fs::read_to_string(app.material_map_path()).expect("sidecar");
+        assert!(!sidecar.contains("1=m.material.json"), "{sidecar}");
+
+        app.redo();
+        assert_eq!(app.material_map.get(1), Some("m.material.json"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn creating_a_material_writes_json_and_guid() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_mat_create_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.assets.root = root.clone();
+        app.assets.entries.clear();
+        app.path = root.join("scene.json");
+        app.material_name_buffer = "Ladrillo rojo".to_owned();
+
+        app.create_material(&ctx);
+
+        let path = "Ladrillo_rojo.material.json";
+        assert!(root.join(path).exists());
+        let text = std::fs::read_to_string(root.join(path)).expect("material json");
+        assert_eq!(
+            crate::materials::Material::decode(&text).name,
+            "Ladrillo_rojo"
+        );
+        assert!(root.join(format!("{path}.meta")).exists());
+        assert_eq!(app.selected_asset.as_deref(), Some(path));
+        assert!(app.material_library.get(path).is_some());
+
+        app.undo();
+        assert!(
+            !root.join(path).exists(),
+            "el undo retira el fichero creado"
+        );
+        assert!(
+            !root.join(format!("{path}.meta")).exists(),
+            "el undo retira también el GUID huérfano"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

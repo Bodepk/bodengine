@@ -22,6 +22,8 @@ pub(crate) enum AssetKind {
     Image,
     Audio,
     Mesh,
+    /// Material editor-owned de ADR-047 (`*.material.json`).
+    Material,
 }
 
 impl AssetKind {
@@ -107,6 +109,13 @@ impl AssetFilter {
 /// Clasifica un archivo por extensión; devuelve `None` si no es un asset soportado.
 #[must_use]
 pub(crate) fn classify_asset(path: &Path) -> Option<AssetKind> {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(crate::materials::MATERIAL_SUFFIX))
+    {
+        return Some(AssetKind::Material);
+    }
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
     match extension.as_str() {
         "png" | "jpg" | "jpeg" => Some(AssetKind::Image),
@@ -274,7 +283,11 @@ fn asset_interactions(app: &mut EditorApp, ui: &Ui, entry: &AssetEntry, response
         app.selected_asset = Some(entry.path.clone());
     }
     if response.double_clicked() {
-        app.create_entity_from_asset(&entry.path, app.view_center);
+        if entry.kind == AssetKind::Material {
+            app.assign_material_to_selection(Some(&entry.path));
+        } else {
+            app.create_entity_from_asset(&entry.path, app.view_center);
+        }
     }
     if response.drag_started() {
         crate::dnd::set_asset(
@@ -301,10 +314,19 @@ fn asset_row_ui(app: &mut EditorApp, ui: &mut Ui, entry: &AssetEntry) {
             );
         }
     } else {
+        if entry.kind == AssetKind::Material {
+            let color = app
+                .material_library
+                .get(&entry.path)
+                .map_or(Color32::from_gray(70), |material| material.preview_color());
+            let swatch = egui::Rect::from_min_size(rect.min, Vec2::new(42.0, 42.0));
+            ui.painter().rect_filled(swatch, 3.0, color);
+        }
         let label = match entry.kind {
             AssetKind::Audio => "A",
             AssetKind::Mesh => "M",
             AssetKind::Image => "I",
+            AssetKind::Material => "P",
         };
         ui.painter().text(
             rect.min + Vec2::new(12.0, 12.0),
@@ -352,18 +374,29 @@ fn asset_tile_ui(app: &mut EditorApp, ui: &mut Ui, entry: &AssetEntry) {
             );
         }
     } else {
-        let label = match entry.kind {
-            AssetKind::Audio => "A",
-            AssetKind::Mesh => "M",
-            AssetKind::Image => "I",
-        };
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            label,
-            egui::FontId::proportional(22.0),
-            Color32::LIGHT_BLUE,
-        );
+        if entry.kind == AssetKind::Material {
+            let color = app
+                .material_library
+                .get(&entry.path)
+                .map_or(Color32::from_gray(70), |material| material.preview_color());
+            let swatch =
+                egui::Rect::from_min_size(rect.min + Vec2::new(2.0, 2.0), Vec2::new(64.0, 64.0));
+            ui.painter().rect_filled(swatch, 3.0, color);
+        } else {
+            let label = match entry.kind {
+                AssetKind::Audio => "A",
+                AssetKind::Mesh => "M",
+                AssetKind::Image => "I",
+                AssetKind::Material => unreachable!(),
+            };
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(22.0),
+                Color32::LIGHT_BLUE,
+            );
+        }
     }
 
     ui.painter().text(
@@ -386,6 +419,15 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
     if ui.button("Recargar").clicked() {
         let ctx = ui.ctx().clone();
         app.reload_assets(&ctx);
+    }
+    ui.add(
+        egui::TextEdit::singleline(&mut app.material_name_buffer)
+            .hint_text("nombre material")
+            .desired_width(120.0),
+    );
+    if ui.button("+ Material").clicked() {
+        let ctx = ui.ctx().clone();
+        app.create_material(&ctx);
     }
     if let Some(error) = &app.assets.error {
         ui.colored_label(Color32::RED, error);
@@ -436,6 +478,12 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
             .clicked()
         {
             kind = Some(AssetKind::Mesh);
+        }
+        if ui
+            .selectable_label(kind == Some(AssetKind::Material), "Mat")
+            .clicked()
+        {
+            kind = Some(AssetKind::Material);
         }
     });
     app.asset_kind_filter = kind;
@@ -497,6 +545,7 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
                 Some(AssetKind::Image) => "imagen",
                 Some(AssetKind::Audio) => "audio",
                 Some(AssetKind::Mesh) => "malla",
+                Some(AssetKind::Material) => "material",
                 None => "desconocido",
             };
             ui.label(format!("Tipo: {kind}"));
@@ -504,9 +553,19 @@ pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
                 ui.label(format!("{}×{} px", dimensions[0], dimensions[1]));
             }
             ui.separator();
+            let kind = app.assets.kind(&path);
+            if kind == Some(AssetKind::Material) {
+                ui.label("Material (ADR-047)");
+                let mut edited = app.material_library.get(&path).cloned();
+                if let Some(material) = edited.as_mut()
+                    && material.editor_ui(ui)
+                {
+                    app.commit_material_edit(&path, material.clone());
+                }
+                return;
+            }
             ui.label("Opciones de importación");
             use crate::import_options::{TextureFilter, TextureWrap};
-            let kind = app.assets.kind(&path);
             let mut changed = false;
             if kind == Some(AssetKind::Image) {
                 let mut filter = app.asset_options.texture.filter;
@@ -608,6 +667,10 @@ mod tests {
         );
         assert_eq!(classify_asset(Path::new("ship.glb")), Some(AssetKind::Mesh));
         assert_eq!(classify_asset(Path::new("notes.txt")), None);
+        assert_eq!(
+            classify_asset(Path::new("m.material.json")),
+            Some(AssetKind::Material)
+        );
     }
 
     #[test]
@@ -786,6 +849,30 @@ mod tests {
             .collect();
         output.textures_delta.clear();
         texts
+    }
+
+    #[test]
+    fn asset_panel_edits_materials_with_fixed_preview() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.assets.entries.clear();
+        app.assets.entries.push(AssetEntry {
+            path: "piedra.material.json".to_owned(),
+            kind: AssetKind::Material,
+        });
+        app.material_library.insert(
+            "piedra.material.json".to_owned(),
+            crate::materials::Material::default(),
+        );
+        app.selected_asset = Some("piedra.material.json".to_owned());
+        let texts = rendered_asset_panel(&mut app, &ctx);
+        assert!(
+            texts.iter().any(|text| text == "Material (ADR-047)"),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|text| text.contains("Metallic")));
+        assert!(texts.iter().any(|text| text.contains("Albedo")));
+        assert!(texts.iter().any(|text| text.contains("Mat")));
     }
 
     #[test]
