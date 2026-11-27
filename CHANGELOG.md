@@ -30,6 +30,11 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - E14 del editor: gizmo único para toda la selección en 2D y 3D, con selector Global/Local (`Q`, persistido en preferencias). En Global el origen es el centro del grupo y los ejes son del mundo; en Local es el origen de la entidad ancla y los ejes giran con ella. Rotar y escalar grupos en 2D y trasladar grupos en 3D dejan una sola entrada de undo.
 - E15 del editor y ADR-035: guardar la selección como prefab con su jerarquía, instanciar de una a diez copias con ids nuevos, procedencia `PrefabRef` y borrado de plantillas que limpia referencias sin romper las instancias; guardar, instanciar y borrar son comandos atómicos con undo.
 - E16 del editor y ADR-034: GUIDs estables en ficheros `.meta` junto a cada asset e índice `guid_index.txt`; al recargar, abrir o guardar se resuelven las rutas movidas en un solo paso de undo, se muestran las referencias rotas y el content browser muestra el GUID del asset seleccionado. El esquema de escenas y la API pública del motor no cambian.
+- E42 del editor y ADR-042: ventana «Timeline de animación» con reproducción de clips de sprite (bucle, velocidad y fotograma actual) en memoria, sin mutar la escena ni persistirse; se abre desde el inspector.
+- E43 del editor y ADR-043: comandos atómicos `ApplyPrefab`/`UpdatePrefab` y botones «Aplicar»/«Actualizar» en el inspector; propagan cambios entre la plantilla y sus instancias conservando la traslación de la raíz, con un solo paso de undo.
+- E44 del editor y ADR-044: `shading_mode` y `asset_view` se guardan en `settings.txt` y se restauran al iniciar; los valores inválidos caen al default sin afectar a la escena.
+- E45 del editor y ADR-045: ventana «Historial» con etiquetas de los comandos pendientes de deshacer/rehacer, salto a cualquier punto y sincronización con el historial de `scripts.map.txt`.
+- E46 del editor y ADR-046: ventana «Validación de escena» con ids duplicados, plantillas y assets inexistentes, clips fuera de la hoja, scripts sin entidad y diagnósticos del juego; el informe es en memoria y no repara ni muta la escena. README y tabla de hitos puestos al día con E42–E46.
 
 ### Cambiado
 

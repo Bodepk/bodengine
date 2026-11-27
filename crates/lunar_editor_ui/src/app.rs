@@ -83,6 +83,9 @@ pub(crate) struct EditorApp {
     pub(crate) show_log: bool,
     /// Ventana de historial de comandos (E45); no se persiste.
     pub(crate) show_history: bool,
+    /// Informe de validación y su ventana (E46); no se persiste.
+    pub(crate) show_validation: bool,
+    pub(crate) validation_issues: Vec<crate::validation::Issue>,
     /// Ventana de timeline y su reloj de vista previa (E42); no se persiste.
     pub(crate) show_timeline: bool,
     pub(crate) timeline_state: crate::timeline::TimelineState,
@@ -193,6 +196,8 @@ impl EditorApp {
             console_draft: String::new(),
             show_log: false,
             show_history: false,
+            show_validation: false,
+            validation_issues: Vec::new(),
             show_timeline: false,
             timeline_state: crate::timeline::TimelineState::default(),
             start_time,
@@ -275,6 +280,22 @@ impl EditorApp {
         for error in crate::scripts::diagnostics(&text) {
             self.set_status_level(crate::status::Level::Error, error);
         }
+    }
+
+    /// Recalcula el informe de validación sin mutar la escena (E46).
+    pub(crate) fn run_validation(&mut self) {
+        let text = std::fs::read_to_string(self.script_diagnostics_path()).unwrap_or_default();
+        self.validation_issues = crate::validation::validate(
+            self.document.scene(),
+            &self.assets.entries,
+            &self.guid_index,
+            &self.script_map,
+            &text,
+        );
+        self.set_status(format!(
+            "Validación: {} problema(s)",
+            self.validation_issues.len()
+        ));
     }
 
     /// Edita un enlace como un único paso de undo, apareado con un comando
@@ -1487,6 +1508,13 @@ impl eframe::App for EditorApp {
         });
         crate::dialogs::show(self, &ctx);
         crate::status::log_window(self, &ctx);
+        let mut validation_open = self.show_validation;
+        if validation_open {
+            egui::Window::new("Validación de escena")
+                .open(&mut validation_open)
+                .show(&ctx, |ui| crate::validation::validation_ui(self, ui));
+            self.show_validation = validation_open;
+        }
         let mut history_open = self.show_history;
         if history_open {
             egui::Window::new("Historial")
@@ -2504,6 +2532,29 @@ mod tests {
         assert!(app.script_map.get(4).is_none());
         app.redo();
         assert_eq!(app.script_map.get(4), Some(&binding));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn validation_report_reads_diagnostics_without_changing_the_scene() {
+        let ctx = Context::default();
+        let root = std::env::temp_dir().join(format!("lunar_validation_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = EditorDocument::new();
+        app.path = root.join("escena.json");
+        let diagnostics = app.script_diagnostics_path();
+        std::fs::write(&diagnostics, "problema del juego\n").expect("diagnostics");
+        let before = app.document.scene().clone();
+
+        app.run_validation();
+
+        assert_eq!(app.document.scene(), &before);
+        assert!(
+            app.validation_issues
+                .iter()
+                .any(|issue| issue.message.contains("problema del juego"))
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

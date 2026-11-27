@@ -2,7 +2,7 @@
 
 Motor híbrido 2D/3D en construcción: núcleo Rust, API pública C++ mediante `cxx` y editor como crate opcional.
 
-> Estado actual: **H0 a H20 completados** y release `v0.2.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024), servicios 3D en C++ (ADR-025), documentos de escena y recarga desde C++ (ADR-026), escenas v2 con sprites, animación y prefabs (ADR-027), diagnósticos con replay de input y hashes de estado (ADR-028) y la publicación `v0.2.0` (ADR-029). Las decisiones quedan registradas en ADR.
+> Estado actual: **H0 a H20 completados** y release `v0.2.0` disponible. El motor y sus hitos aprobados están implementados; además hay un editor GUI opcional con vista 2D, assets arrastrables y jerarquía reordenable (ADR-019/020), un plataformas 2D jugable con sprites (ADR-018), scripting C++ de primera clase con el plataformas portado a C++ (ADR-021), un SDK C++ instalable con `find_package` (ADR-022), input de ratón, scroll y conversión de viewport en C++ (ADR-023), audio desde C++ (ADR-024), servicios 3D en C++ (ADR-025), documentos de escena y recarga desde C++ (ADR-026), escenas v2 con sprites, animación y prefabs (ADR-027), diagnósticos con replay de input y hashes de estado (ADR-028) y la publicación `v0.2.0` (ADR-029). La Fase 2 del editor añadió timeline de sprites, propagación de prefabs, persistencia de vistas, historial de comandos etiquetado y validación de escena (E42–E46, ADR-042…046). Las decisiones quedan registradas en ADR.
 
 ## Principios
 
@@ -100,6 +100,8 @@ No hay diálogo nativo de carpetas (`rfd` no está en el stack) ni render propio
 
 El plataformas (ADR-018) abre una ventana 960×540 y consume `examples/sprite_platformer/assets/platformer.scene.json`. `A`/`D` o las flechas mueven, `W`/`ArrowUp` salta y `Escape` sale; recoger manzanas y llegar a la meta se informa por stdout. Usa sprites CC0 de Pixel Adventure 1, con procedencia en `assets/ASSETS.md`. `lunar_render` dibuja hojas de sprites mediante `SpriteId`/`SpriteDraw` sin exponer tipos `wgpu` nuevos.
 
+La Fase 2 del editor (E42–E46) añade una ventana de **Timeline de animación** que reproduce los clips de `Component::Sprite` sin mutar la escena (ADR-042); botones **Aplicar**/**Actualizar** para propagar plantillas a sus instancias con comandos atómicos, conservando la traslación de la raíz (ADR-043); persistencia de `shading_mode` y `asset_view` en `settings.txt` con valores inválidos que caen al default (ADR-044); una ventana de **Historial** con etiquetas de comando y salto a cualquier punto (ADR-045); y una ventana de **Validación de escena** que detecta ids duplicados, plantillas y assets inexistentes, clips fuera de la hoja, scripts sin entidad y diagnósticos del juego, sin autoreparar ni escribir en la escena (ADR-046). Ninguna de estas vistas se persiste ni cambia el esquema v2.
+
 La versión canónica de ese plataformas es la de **C++** (ADR-021): `examples/cpp_platformer` enlaza la staticlib de `lunar_bridge`, hereda de la clase `Game` y concentra en C++ todo el estado, el input, la animación, el AABB de manzanas/meta y la cámara. Rust conserva la ventana, el reloj de 60 Hz, Rapier, la decodificación PNG, el parseo JSON y `Renderer`: C++ solo emite órdenes `SpriteDrawCpp`, sin ver `wgpu`. El ejecutable Rust `sprite_platformer` se mantiene como banco de pruebas de la API Rust.
 
 ```bash
@@ -176,5 +178,6 @@ Los diagnósticos (ADR-028) añaden `FrameMetricsCpp` con coste de CPU/render y 
 | H17 | Documentos de escena y recarga desde C++ (ADR-026) | ✅ |
 | H18 | Escenas v2 con sprites, animación y prefabs (ADR-027) | ✅ |
 | H19 | Diagnósticos, replay de input y hashes de estado (ADR-028) | ✅ |
+| H20 | Publicación `v0.2.0` y Fase 2 del editor (E42–E46, ADR-042…046) | ✅ |
 
 Las decisiones y sus consecuencias están en [`docs/adr`](docs/adr/ADR-000-index.md). El historial de versiones está en [`CHANGELOG.md`](CHANGELOG.md).

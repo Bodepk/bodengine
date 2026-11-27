@@ -184,6 +184,12 @@ impl ScriptMap {
         }
     }
 
+    /// IDs con comportamiento asignado, ordenados.
+    #[must_use]
+    pub(crate) fn ids(&self) -> Vec<u64> {
+        self.bindings.keys().copied().collect()
+    }
+
     /// Descarta enlaces de entidades que ya no existen.
     pub(crate) fn retain(&mut self, ids: &[u64]) {
         self.bindings.retain(|id, _| ids.contains(id));

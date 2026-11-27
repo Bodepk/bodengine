@@ -30,6 +30,7 @@ mod shortcuts;
 mod status;
 mod timeline;
 mod tools;
+mod validation;
 mod view3d;
 
 use std::path::PathBuf;

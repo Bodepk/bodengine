@@ -64,6 +64,10 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
         if ui.button("Historial").clicked() {
             app.show_history = !app.show_history;
         }
+        if ui.button("Validar").clicked() {
+            app.show_validation = !app.show_validation;
+            app.run_validation();
+        }
         ui.separator();
         ui.label(format!(
             "{} entidad(es)",
