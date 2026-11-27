@@ -81,6 +81,9 @@ pub(crate) struct EditorApp {
     pub(crate) console_history_index: Option<usize>,
     pub(crate) console_draft: String,
     pub(crate) show_log: bool,
+    /// Ventana de timeline y su reloj de vista previa (E42); no se persiste.
+    pub(crate) show_timeline: bool,
+    pub(crate) timeline_state: crate::timeline::TimelineState,
     start_time: Instant,
     pub(crate) assets: AssetLibrary,
     /// GUIDs leídos de los `.meta` y alias de rutas movidas (ADR-034).
@@ -187,6 +190,8 @@ impl EditorApp {
             console_history_index: None,
             console_draft: String::new(),
             show_log: false,
+            show_timeline: false,
+            timeline_state: crate::timeline::TimelineState::default(),
             start_time,
             assets,
             guid_index,
@@ -1158,6 +1163,23 @@ impl EditorApp {
         self.set_status("Play detenido; vista previa descartada");
     }
 
+    /// Avanza la vista previa de la timeline sin mutar la escena (E42).
+    pub(crate) fn tick_timeline(&mut self, dt: f32) {
+        if !self.timeline_state.playing {
+            return;
+        }
+        let Some(id) = self.document.selection().first().copied() else {
+            return;
+        };
+        let Some((_, clips)) = crate::timeline::selected_clips(self.document.scene(), id) else {
+            return;
+        };
+        let Some(clip) = clips.get(self.timeline_state.clip).cloned() else {
+            return;
+        };
+        crate::timeline::advance(&mut self.timeline_state, dt, &clip);
+    }
+
     /// Avanza la simulación. Los cambios viven en `preview`, nunca en la escena.
     pub(crate) fn tick_play(&mut self, dt: f32) {
         if self.play_state != PlayState::Playing {
@@ -1332,6 +1354,7 @@ impl eframe::App for EditorApp {
         let dt = ctx.input(|input| input.stable_dt);
         let now_ms = (ctx.input(|input| input.time) * 1000.0) as u64;
         self.tick_play(dt);
+        self.tick_timeline(dt);
         self.tick_reimport(&ctx, now_ms);
         self.tick_scripts(now_ms);
         self.handle_shortcuts(&ctx);
@@ -1375,6 +1398,13 @@ impl eframe::App for EditorApp {
         });
         crate::dialogs::show(self, &ctx);
         crate::status::log_window(self, &ctx);
+        let mut timeline_open = self.show_timeline;
+        if timeline_open {
+            egui::Window::new("Timeline de animación")
+                .open(&mut timeline_open)
+                .show(&ctx, |ui| crate::timeline::timeline_ui(self, ui));
+            self.show_timeline = timeline_open;
+        }
     }
 }
 
@@ -1482,6 +1512,47 @@ mod tests {
         assert_eq!(
             app.document.scene().entities[0].transform.translation[1],
             3.0
+        );
+        assert!(!app.document.is_dirty());
+    }
+
+    #[test]
+    fn the_animation_timeline_advances_without_touching_the_scene() {
+        use lunar_scenes::{AnimationClip, SpriteMeta};
+
+        let mut entity = SceneEntity::new(1);
+        entity.components.push(Component::Sprite {
+            asset: "hero.png".to_owned(),
+            meta: SpriteMeta {
+                frame_width: 16,
+                frame_height: 16,
+                columns: 2,
+                rows: 1,
+                fps: 4.0,
+                looping: true,
+            },
+            animations: vec![AnimationClip {
+                name: "caminar".to_owned(),
+                frames: vec![0, 1],
+                fps: 4.0,
+                looping: true,
+            }],
+        });
+        let mut scene = Scene::new();
+        scene.entities.push(entity);
+        let mut app = fresh_app();
+        app.document = EditorDocument::from_scene(scene).expect("document");
+        app.select_clicked(1, false, false);
+        app.timeline_state.playing = true;
+        app.tick_timeline(0.25);
+        assert_eq!(app.timeline_state.elapsed, 0.25);
+        let clip = match &app.document.scene().entities[0].components[0] {
+            Component::Sprite { animations, .. } => animations[0].clone(),
+            _ => panic!("se esperaba un sprite"),
+        };
+        assert_eq!(
+            crate::timeline::frame_at(&clip, app.timeline_state.elapsed),
+            1
         );
         assert!(!app.document.is_dirty());
     }

@@ -27,6 +27,7 @@ mod scripts;
 mod settings;
 mod shortcuts;
 mod status;
+mod timeline;
 mod tools;
 mod view3d;
 

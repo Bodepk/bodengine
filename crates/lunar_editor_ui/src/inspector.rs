@@ -44,6 +44,11 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
             "{selection_count} entidades seleccionadas · los cambios de este panel afectan a #{id}"
         ));
     }
+    if crate::timeline::selected_clips(app.document.scene(), id).is_some()
+        && ui.button("Abrir timeline de animación").clicked()
+    {
+        app.show_timeline = true;
+    }
     ui.label("Nombre");
     let name_response =
         ui.add(egui::TextEdit::singleline(&mut app.name_buffer).hint_text("Sin nombre"));
