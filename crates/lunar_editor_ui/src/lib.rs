@@ -11,6 +11,7 @@ mod components;
 mod config;
 mod dialogs;
 mod file_picker;
+mod gizmo;
 mod helpers;
 mod hierarchy;
 mod inspector;

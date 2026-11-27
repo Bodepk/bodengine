@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use crate::config::config_dir;
+use crate::tools::TransformSpace;
 
 pub(crate) const DEFAULT_ASSETS_ROOT: &str = "examples/sprite_platformer/assets";
 pub(crate) const MIN_ZOOM: f32 = 8.0;
@@ -18,6 +19,8 @@ pub(crate) struct EditorSettings {
     pub(crate) zoom: f32,
     pub(crate) show_grid: bool,
     pub(crate) snap: bool,
+    /// Espacio del gizmo (E14). Se guarda como texto estable, no como `Debug`.
+    pub(crate) transform_space: TransformSpace,
 }
 
 impl Default for EditorSettings {
@@ -28,6 +31,7 @@ impl Default for EditorSettings {
             zoom: 48.0,
             show_grid: true,
             snap: false,
+            transform_space: TransformSpace::default(),
         }
     }
 }
@@ -36,8 +40,12 @@ impl Default for EditorSettings {
 #[must_use]
 pub(crate) fn encode(settings: &EditorSettings) -> String {
     let root = settings.assets_root.replace(['\r', '\n'], "");
+    let space = match settings.transform_space {
+        TransformSpace::Global => "global",
+        TransformSpace::Local => "local",
+    };
     format!(
-        "assets_root={root}\ncenter_x={}\ncenter_y={}\nzoom={}\nshow_grid={}\nsnap={}\n",
+        "assets_root={root}\ncenter_x={}\ncenter_y={}\nzoom={}\nshow_grid={}\nsnap={}\ntransform_space={space}\n",
         settings.center[0], settings.center[1], settings.zoom, settings.show_grid, settings.snap
     )
 }
@@ -74,6 +82,15 @@ pub(crate) fn decode(contents: &str) -> EditorSettings {
             }
             "show_grid" => settings.show_grid = boolean(value, settings.show_grid),
             "snap" => settings.snap = boolean(value, settings.snap),
+            "transform_space" => {
+                settings.transform_space = if value.eq_ignore_ascii_case("local") {
+                    TransformSpace::Local
+                } else if value.eq_ignore_ascii_case("global") {
+                    TransformSpace::Global
+                } else {
+                    settings.transform_space
+                };
+            }
             _ => {}
         }
     }
@@ -134,8 +151,26 @@ mod tests {
             zoom: 96.0,
             show_grid: false,
             snap: true,
+            transform_space: TransformSpace::Local,
         };
         assert_eq!(decode(&encode(&settings)), settings);
+    }
+
+    #[test]
+    fn the_transform_space_is_persisted_and_validated() {
+        assert_eq!(
+            decode("transform_space=local").transform_space,
+            TransformSpace::Local
+        );
+        assert_eq!(
+            decode("transform_space=GLOBAL").transform_space,
+            TransformSpace::Global
+        );
+        assert_eq!(
+            decode("transform_space=otro").transform_space,
+            TransformSpace::Global
+        );
+        assert!(encode(&EditorSettings::default()).contains("transform_space=global"));
     }
 
     #[test]

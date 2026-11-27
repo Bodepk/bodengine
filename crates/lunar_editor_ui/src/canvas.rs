@@ -11,11 +11,10 @@ use lunar_scenes::{Component, Transform};
 
 use crate::app::EditorApp;
 use crate::assets::ASSET_PAYLOAD_PREFIX;
-use crate::helpers::{
-    angle_from_quaternion, contains_point, image_world_size, quaternion_from_angle, snap_to_grid,
-};
+use crate::gizmo::{Originals, reference, reference_angle};
+use crate::helpers::{angle_from_quaternion, contains_point, image_world_size, snap_to_grid};
 use crate::play::PlayState;
-use crate::tools::TransformMode;
+use crate::tools::{TransformMode, TransformSpace};
 use crate::view3d::{Drag3D, ViewMode};
 
 /// Vista ortográfica del lienzo: centro en mundo y píxeles por unidad.
@@ -83,16 +82,16 @@ pub(crate) enum CanvasDrag {
         originals: Vec<(u64, Transform)>,
     },
     Scale {
-        id: u64,
         pointer: Pos2,
         center: Pos2,
-        original: Transform,
+        pivot: [f32; 2],
+        originals: Originals,
     },
     Rotate {
-        id: u64,
         pointer: Pos2,
         center: Pos2,
-        original: Transform,
+        pivot: [f32; 2],
+        originals: Originals,
     },
 }
 
@@ -103,6 +102,21 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
         preferences_changed |= ui.checkbox(&mut app.snap, "Snap 0.25").changed();
         ui.label(format!("Zoom {:.0}", app.zoom));
         ui.label(format!("Herramienta: {}", app.transform_mode.label()));
+        ui.separator();
+        if ui
+            .selectable_label(app.transform_space == TransformSpace::Global, "Global (Q)")
+            .clicked()
+        {
+            app.transform_space = TransformSpace::Global;
+            preferences_changed = true;
+        }
+        if ui
+            .selectable_label(app.transform_space == TransformSpace::Local, "Local (Q)")
+            .clicked()
+        {
+            app.transform_space = TransformSpace::Local;
+            preferences_changed = true;
+        }
         ui.separator();
         if ui
             .selectable_label(app.view_mode == ViewMode::TwoD, ViewMode::TwoD.label())
@@ -122,7 +136,9 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
             app.drag = CanvasDrag::None;
             app.view3d_drag = Drag3D::None;
         }
-        ui.label("W mover · E rotar · R escalar · F encuadrar · rueda zoom · derecho paneo");
+        ui.label(
+            "W mover · E rotar · R escalar · Q espacio · F encuadrar · rueda zoom · derecho paneo",
+        );
         if app.play_state != PlayState::Stopped {
             ui.label(format!(
                 "Play {:.2}s · {}",
@@ -185,7 +201,13 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
     for item in &items {
         paint_item(ui, item);
     }
-    paint_selection(ui, &items, app.transform_mode);
+    paint_selection(
+        ui,
+        &items,
+        app.transform_mode,
+        app.transform_space,
+        app.selection_anchor,
+    );
     paint_marquee(ui, &app.drag);
 
     let pointer = response.hover_pos();
@@ -351,6 +373,56 @@ fn scale_handle(bounds: Rect) -> Pos2 {
     bounds.max + Vec2::new(6.0, 6.0)
 }
 
+/// Transformaciones visibles de la selección (preview incluido), en orden de dibujo.
+#[must_use]
+fn selected_originals(items: &[DrawItem]) -> Originals {
+    items
+        .iter()
+        .filter(|item| item.selected)
+        .map(|item| (item.id, item.transform))
+        .collect()
+}
+
+/// Origen del gizmo: centro del rectángulo envolvente en `Global`, origen de
+/// la entidad ancla en `Local` (E14).
+#[must_use]
+fn gizmo_origin(items: &[DrawItem], space: TransformSpace, anchor: Option<u64>) -> Option<Pos2> {
+    match space {
+        TransformSpace::Global => selection_center(items),
+        TransformSpace::Local => {
+            let originals = selected_originals(items);
+            let (id, _) = reference(&originals, anchor)?;
+            items
+                .iter()
+                .find(|item| item.id == *id)
+                .map(|item| item.center)
+        }
+    }
+}
+
+/// Ángulo con el que se orientan los tiradores: cero en `Global` y la rotación
+/// Z de la entidad ancla en `Local` (E14).
+#[must_use]
+fn gizmo_angle(items: &[DrawItem], space: TransformSpace, anchor: Option<u64>) -> f32 {
+    match space {
+        TransformSpace::Global => 0.0,
+        TransformSpace::Local => reference_angle(&selected_originals(items), anchor).unwrap_or(0.0),
+    }
+}
+
+/// Gira la posición de un tirador alrededor del origen del gizmo. La pantalla
+/// tiene Y hacia abajo, por lo que un giro positivo en el mundo es negativo aquí.
+#[must_use]
+fn handle_position(origin: Pos2, point: Pos2, angle: f32) -> Pos2 {
+    let delta = point - origin;
+    let (sine, cosine) = (-angle).sin_cos();
+    origin
+        + Vec2::new(
+            delta.x * cosine - delta.y * sine,
+            delta.x * sine + delta.y * cosine,
+        )
+}
+
 fn paint_move_cross(ui: &mut Ui, center: Pos2) {
     ui.painter().circle_filled(center, 5.0, Color32::LIGHT_BLUE);
     let arm = 9.0;
@@ -364,41 +436,52 @@ fn paint_move_cross(ui: &mut Ui, center: Pos2) {
     );
 }
 
-fn paint_selection(ui: &mut Ui, items: &[DrawItem], mode: TransformMode) {
-    let selection_count = items.iter().filter(|item| item.selected).count();
+fn paint_selection(
+    ui: &mut Ui,
+    items: &[DrawItem],
+    mode: TransformMode,
+    space: TransformSpace,
+    anchor: Option<u64>,
+) {
     for item in items.iter().filter(|item| item.selected) {
-        let bounds = Rect::from_points(&sprite_corners(item));
         ui.painter().rect_stroke(
-            bounds,
+            Rect::from_points(&sprite_corners(item)),
             2.0,
             Stroke::new(1.5, Color32::LIGHT_BLUE),
             egui::StrokeKind::Outside,
         );
-        if selection_count != 1 {
-            continue;
-        }
-        match mode {
-            TransformMode::Move => paint_move_cross(ui, bounds.center()),
-            TransformMode::Rotate => {
-                ui.painter()
-                    .circle_filled(rotate_handle(bounds), 5.0, Color32::YELLOW);
-            }
-            TransformMode::Scale => {
-                ui.painter().rect_filled(
-                    Rect::from_center_size(scale_handle(bounds), Vec2::splat(9.0)),
-                    2.0,
-                    Color32::LIGHT_GREEN,
-                );
-            }
-        }
     }
-    // Con varias entidades seleccionadas hay un único tirador de movimiento,
-    // en el centro del grupo (E12). Escalar y rotar siguen siendo por entidad.
-    if selection_count > 1
-        && mode == TransformMode::Move
-        && let Some(center) = selection_center(items)
-    {
-        paint_move_cross(ui, center);
+    let (Some(bounds), Some(origin)) = (
+        items
+            .iter()
+            .filter(|item| item.selected)
+            .map(|item| Rect::from_points(&sprite_corners(item)))
+            .reduce(|acc, rect| acc.union(rect)),
+        gizmo_origin(items, space, anchor),
+    ) else {
+        return;
+    };
+    let angle = gizmo_angle(items, space, anchor);
+    // Un solo gizmo para toda la selección, en el origen elegido (E12 + E14).
+    match mode {
+        TransformMode::Move => paint_move_cross(ui, origin),
+        TransformMode::Rotate => {
+            ui.painter().circle_filled(
+                handle_position(origin, rotate_handle(bounds), angle),
+                5.0,
+                Color32::YELLOW,
+            );
+        }
+        TransformMode::Scale => {
+            ui.painter().rect_filled(
+                Rect::from_center_size(
+                    handle_position(origin, scale_handle(bounds), angle),
+                    Vec2::splat(9.0),
+                ),
+                2.0,
+                Color32::LIGHT_GREEN,
+            );
+        }
     }
 }
 
@@ -540,42 +623,36 @@ fn handle_pointer(
                 pointer,
                 center: app.view_center,
             };
-        } else if let Some(ids) = multi_move_at(items, pointer, app.transform_mode) {
-            let originals = ids
-                .into_iter()
-                .filter_map(|id| {
-                    app.document
-                        .scene()
-                        .entities
-                        .iter()
-                        .find(|entity| entity.id == id)
-                        .map(|entity| (id, entity.transform))
-                })
-                .collect();
+        } else if multi_move_at(
+            items,
+            pointer,
+            app.transform_mode,
+            app.transform_space,
+            app.selection_anchor,
+        ) {
+            let originals = selected_originals(items);
             app.drag = CanvasDrag::Move { pointer, originals };
-        } else if let Some((id, kind)) = handle_at(items, pointer, app.transform_mode) {
-            let transform = app
-                .document
-                .scene()
-                .entities
-                .iter()
-                .find(|entity| entity.id == id)
-                .map(|entity| entity.transform);
-            if let Some(transform) = transform {
-                let center = Pos2::new(transform.translation[0], transform.translation[1]);
-                let center = world_to_screen([center.x, center.y], rect, view);
+        } else if let Some(kind) = handle_at(
+            items,
+            pointer,
+            app.transform_mode,
+            app.transform_space,
+            app.selection_anchor,
+        ) {
+            if let Some(origin) = gizmo_origin(items, app.transform_space, app.selection_anchor) {
+                let pivot = screen_to_world(origin, rect, view);
                 app.drag = match kind {
                     HandleKind::Scale => CanvasDrag::Scale {
-                        id,
                         pointer,
-                        center,
-                        original: transform,
+                        center: origin,
+                        pivot,
+                        originals: selected_originals(items),
                     },
                     HandleKind::Rotate => CanvasDrag::Rotate {
-                        id,
                         pointer,
-                        center,
-                        original: transform,
+                        center: origin,
+                        pivot,
+                        originals: selected_originals(items),
                     },
                 };
             }
@@ -651,35 +728,33 @@ fn handle_pointer(
             }
         }
         CanvasDrag::Scale {
-            id,
             pointer: start,
             center,
-            original,
+            pivot,
+            originals,
         } => {
             if let Some(pointer) = pointer {
                 let start_distance = (start - center).length().max(1.0);
                 let factor = ((pointer - center).length() / start_distance).clamp(0.1, 10.0);
-                let mut transform = original;
-                for value in &mut transform.scale {
-                    *value = (*value * factor).abs().max(0.01);
+                for (id, transform) in crate::gizmo::scale_group(&originals, pivot, factor) {
+                    app.preview.insert(id, transform);
                 }
-                app.preview.insert(id, transform);
             }
         }
         CanvasDrag::Rotate {
-            id,
             pointer: start,
             center,
-            original,
+            pivot,
+            originals,
         } => {
             if let Some(pointer) = pointer {
                 let start_angle = (start.y - center.y).atan2(start.x - center.x);
                 let angle = (pointer.y - center.y).atan2(pointer.x - center.x);
-                let mut transform = original;
-                transform.rotation = quaternion_from_angle(
-                    angle_from_quaternion(original.rotation) - (angle - start_angle),
-                );
-                app.preview.insert(id, transform);
+                for (id, transform) in
+                    crate::gizmo::rotate_group(&originals, pivot, -(angle - start_angle))
+                {
+                    app.preview.insert(id, transform);
+                }
             }
         }
     }
@@ -756,34 +831,50 @@ enum HandleKind {
     Rotate,
 }
 
-/// Tirador de movimiento de grupo: solo con dos o más entidades selectas.
+/// Tirador de movimiento de grupo: dos o más entidades selectas, en el origen
+/// del gizmo del espacio elegido (E12 + E14).
 #[must_use]
-fn multi_move_at(items: &[DrawItem], pointer: Pos2, mode: TransformMode) -> Option<Vec<u64>> {
-    if mode != TransformMode::Move {
-        return None;
+fn multi_move_at(
+    items: &[DrawItem],
+    pointer: Pos2,
+    mode: TransformMode,
+    space: TransformSpace,
+    anchor: Option<u64>,
+) -> bool {
+    if mode != TransformMode::Move || items.iter().filter(|item| item.selected).count() < 2 {
+        return false;
     }
-    let selected: Vec<&DrawItem> = items.iter().filter(|item| item.selected).collect();
-    if selected.len() < 2 {
-        return None;
-    }
-    let center = selection_center(items)?;
-    ((pointer - center).length() <= 8.0).then(|| selected.iter().map(|item| item.id).collect())
+    gizmo_origin(items, space, anchor).is_some_and(|origin| (pointer - origin).length() <= 8.0)
 }
 
-fn handle_at(items: &[DrawItem], pointer: Pos2, mode: TransformMode) -> Option<(u64, HandleKind)> {
-    let selected: Vec<_> = items.iter().filter(|item| item.selected).collect();
-    if selected.len() != 1 {
-        return None;
-    }
-    let item = selected[0];
-    let bounds = Rect::from_points(&sprite_corners(item));
+/// Tirador de rotación o escala del grupo (una o más entidades selectas).
+#[must_use]
+fn handle_at(
+    items: &[DrawItem],
+    pointer: Pos2,
+    mode: TransformMode,
+    space: TransformSpace,
+    anchor: Option<u64>,
+) -> Option<HandleKind> {
+    let bounds = items
+        .iter()
+        .filter(|item| item.selected)
+        .map(|item| Rect::from_points(&sprite_corners(item)))
+        .reduce(|acc, rect| acc.union(rect))?;
+    let origin = gizmo_origin(items, space, anchor)?;
+    let angle = gizmo_angle(items, space, anchor);
     match mode {
         TransformMode::Move => None,
-        TransformMode::Scale if (pointer - scale_handle(bounds)).length() <= 8.0 => {
-            Some((item.id, HandleKind::Scale))
+        TransformMode::Scale
+            if (pointer - handle_position(origin, scale_handle(bounds), angle)).length() <= 8.0 =>
+        {
+            Some(HandleKind::Scale)
         }
-        TransformMode::Rotate if (pointer - rotate_handle(bounds)).length() <= 8.0 => {
-            Some((item.id, HandleKind::Rotate))
+        TransformMode::Rotate
+            if (pointer - handle_position(origin, rotate_handle(bounds), angle)).length()
+                <= 8.0 =>
+        {
+            Some(HandleKind::Rotate)
         }
         _ => None,
     }
@@ -862,6 +953,8 @@ mod tests {
             .collect();
         assert!(texts.iter().any(|text| text == "2D"), "{texts:?}");
         assert!(texts.iter().any(|text| text == "3D"), "{texts:?}");
+        assert!(texts.iter().any(|text| text == "Global (Q)"), "{texts:?}");
+        assert!(texts.iter().any(|text| text == "Local (Q)"), "{texts:?}");
     }
 
     #[test]
@@ -970,18 +1063,63 @@ mod tests {
         let items = [selected];
         let scale = Pos2::new(116.0, 116.0);
         let rotate = Pos2::new(100.0, 68.0);
-        assert_eq!(handle_at(&items, scale, TransformMode::Move), None);
-        assert_eq!(handle_at(&items, rotate, TransformMode::Move), None);
+        let space = TransformSpace::Global;
         assert_eq!(
-            handle_at(&items, scale, TransformMode::Scale),
-            Some((1, HandleKind::Scale))
+            handle_at(&items, scale, TransformMode::Move, space, None),
+            None
         );
-        assert_eq!(handle_at(&items, rotate, TransformMode::Scale), None);
         assert_eq!(
-            handle_at(&items, rotate, TransformMode::Rotate),
-            Some((1, HandleKind::Rotate))
+            handle_at(&items, rotate, TransformMode::Move, space, None),
+            None
         );
-        assert_eq!(handle_at(&items, scale, TransformMode::Rotate), None);
+        assert_eq!(
+            handle_at(&items, scale, TransformMode::Scale, space, None),
+            Some(HandleKind::Scale)
+        );
+        assert_eq!(
+            handle_at(&items, rotate, TransformMode::Scale, space, None),
+            None
+        );
+        assert_eq!(
+            handle_at(&items, rotate, TransformMode::Rotate, space, None),
+            Some(HandleKind::Rotate)
+        );
+        assert_eq!(
+            handle_at(&items, scale, TransformMode::Rotate, space, None),
+            None
+        );
+    }
+
+    #[test]
+    fn the_local_space_moves_the_gizmo_to_the_anchor_and_rotates_its_handles() {
+        let mut first = item(1, Pos2::new(100.0, 100.0));
+        first.selected = true;
+        first.transform.rotation = crate::helpers::quaternion_from_angle(0.0);
+        let mut second = item(2, Pos2::new(300.0, 100.0));
+        second.selected = true;
+        second.transform.rotation =
+            crate::helpers::quaternion_from_angle(std::f32::consts::FRAC_PI_2);
+        let items = [first, second];
+        let center = Pos2::new(200.0, 100.0);
+        assert_eq!(
+            gizmo_origin(&items, TransformSpace::Global, Some(2)),
+            Some(center)
+        );
+        assert_eq!(
+            gizmo_origin(&items, TransformSpace::Local, Some(2)),
+            Some(Pos2::new(300.0, 100.0))
+        );
+        assert_eq!(gizmo_angle(&items, TransformSpace::Global, Some(2)), 0.0);
+        let angle = gizmo_angle(&items, TransformSpace::Local, Some(2));
+        assert!((angle - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        let bounds = Rect::from_min_max(Pos2::new(90.0, 90.0), Pos2::new(310.0, 110.0));
+        let global = handle_position(center, rotate_handle(bounds), 0.0);
+        assert_eq!(global, Pos2::new(200.0, 68.0));
+        let local = handle_position(Pos2::new(300.0, 100.0), rotate_handle(bounds), angle);
+        assert!(
+            (local.x - 268.0).abs() < 0.01 && (local.y - 200.0).abs() < 0.01,
+            "el tirador local debe girar con el ancla: {local:?}"
+        );
     }
 
     #[test]
@@ -1043,6 +1181,69 @@ mod tests {
     }
 
     #[test]
+    fn group_rotate_and_scale_previews_are_one_undo_step() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = lunar_editor::EditorDocument::new();
+        for id in 1..=2 {
+            app.document
+                .apply(EditorCommand::CreateEntity { id, name: None })
+                .expect("create entity");
+        }
+        app.document
+            .apply(EditorCommand::SetTransforms {
+                transforms: vec![
+                    (
+                        1,
+                        Transform {
+                            translation: [0.0, 0.0, 0.0],
+                            ..Transform::default()
+                        },
+                    ),
+                    (
+                        2,
+                        Transform {
+                            translation: [2.0, 0.0, 0.0],
+                            ..Transform::default()
+                        },
+                    ),
+                ],
+            })
+            .expect("place entities");
+        let originals: Originals = app
+            .document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| (entity.id, entity.transform))
+            .collect();
+        let history = app.document.undo_len();
+        for (id, transform) in
+            crate::gizmo::rotate_group(&originals, [1.0, 0.0], std::f32::consts::FRAC_PI_2)
+        {
+            app.preview.insert(id, transform);
+        }
+        commit_preview(&mut app);
+        assert_eq!(app.document.undo_len(), history + 1);
+        let rotated = app.document.scene().entities[1].transform.translation;
+        for (value, target) in rotated.into_iter().zip([1.0, 1.0, 0.0]) {
+            assert!((value - target).abs() < 1e-5, "{rotated:?}");
+        }
+        app.document.undo();
+        assert_eq!(app.document.scene().entities[1].transform, originals[1].1);
+
+        for (id, transform) in crate::gizmo::scale_group(&originals, [1.0, 0.0], 2.0) {
+            app.preview.insert(id, transform);
+        }
+        commit_preview(&mut app);
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert_eq!(
+            app.document.scene().entities[0].transform.translation,
+            [-1.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
     fn committing_an_unchanged_preview_keeps_history_intact() {
         let ctx = egui::Context::default();
         let mut app = EditorApp::new(None, &ctx);
@@ -1100,27 +1301,39 @@ mod tests {
             Some(Pos2::new(200.0, 150.0)),
             "el tirador debe estar en el centro del rectángulo que envuelve la selección"
         );
-        assert_eq!(
-            multi_move_at(&items, Pos2::new(200.0, 150.0), TransformMode::Move),
-            Some(vec![1, 2])
-        );
-        assert_eq!(
-            multi_move_at(&items, Pos2::new(260.0, 150.0), TransformMode::Move),
+        assert!(multi_move_at(
+            &items,
+            Pos2::new(200.0, 150.0),
+            TransformMode::Move,
+            TransformSpace::Global,
             None
-        );
-        assert_eq!(
-            multi_move_at(&items, Pos2::new(200.0, 150.0), TransformMode::Scale),
+        ));
+        assert!(!multi_move_at(
+            &items,
+            Pos2::new(260.0, 150.0),
+            TransformMode::Move,
+            TransformSpace::Global,
             None
-        );
+        ));
+        assert!(!multi_move_at(
+            &items,
+            Pos2::new(200.0, 150.0),
+            TransformMode::Scale,
+            TransformSpace::Global,
+            None
+        ));
     }
 
     #[test]
     fn group_move_handle_needs_more_than_one_selected_entity() {
         let mut only = item(7, Pos2::new(100.0, 100.0));
         only.selected = true;
-        assert_eq!(
-            multi_move_at(&[only], Pos2::new(100.0, 100.0), TransformMode::Move),
+        assert!(!multi_move_at(
+            &[only],
+            Pos2::new(100.0, 100.0),
+            TransformMode::Move,
+            TransformSpace::Global,
             None
-        );
+        ));
     }
 }

@@ -17,6 +17,7 @@ pub(crate) struct ShortcutKeys {
     pub(crate) move_tool: bool,
     pub(crate) rotate_tool: bool,
     pub(crate) scale_tool: bool,
+    pub(crate) toggle_space: bool,
     pub(crate) toggle_play: bool,
     pub(crate) stop_play: bool,
 }
@@ -37,6 +38,7 @@ pub(crate) struct ShortcutActions {
     pub(crate) move_tool: bool,
     pub(crate) rotate_tool: bool,
     pub(crate) scale_tool: bool,
+    pub(crate) toggle_space: bool,
     pub(crate) toggle_play: bool,
     pub(crate) stop_play: bool,
 }
@@ -45,7 +47,8 @@ pub(crate) struct ShortcutActions {
 /// actual, y `Ctrl+Shift+Z` rehace en lugar de deshacer. `W`/`E`/`R` cambian la
 /// herramienta solo sin modificadores, para no pisar los atajos con `Ctrl`.
 /// Copiar, cortar y pegar exigen `Ctrl` y descartan `Shift` para no interferir
-/// con los atajos de formato del sistema (E13).
+/// con los atajos de formato del sistema (E13). `Q` alterna el espacio del
+/// gizmo solo sin modificadores (E14).
 #[must_use]
 pub(crate) fn resolve(keys: ShortcutKeys) -> ShortcutActions {
     let ShortcutKeys {
@@ -63,6 +66,7 @@ pub(crate) fn resolve(keys: ShortcutKeys) -> ShortcutActions {
         move_tool,
         rotate_tool,
         scale_tool,
+        toggle_space,
         toggle_play,
         stop_play,
     } = keys;
@@ -81,6 +85,7 @@ pub(crate) fn resolve(keys: ShortcutKeys) -> ShortcutActions {
         move_tool: plain && move_tool,
         rotate_tool: plain && rotate_tool,
         scale_tool: plain && scale_tool,
+        toggle_space: plain && toggle_space,
         toggle_play: plain && toggle_play,
         stop_play: plain && stop_play,
     }
@@ -252,6 +257,27 @@ mod tests {
             })
             .scale_tool
         );
+    }
+
+    #[test]
+    fn q_toggles_the_gizmo_space_without_modifiers() {
+        let plain = resolve(ShortcutKeys {
+            toggle_space: true,
+            ..Default::default()
+        });
+        assert!(plain.toggle_space);
+        let with_ctrl = resolve(ShortcutKeys {
+            command: true,
+            toggle_space: true,
+            ..Default::default()
+        });
+        assert!(!with_ctrl.toggle_space);
+        let with_shift = resolve(ShortcutKeys {
+            shift: true,
+            toggle_space: true,
+            ..Default::default()
+        });
+        assert!(!with_shift.toggle_space);
     }
 
     #[test]

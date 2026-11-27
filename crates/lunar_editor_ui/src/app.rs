@@ -17,7 +17,7 @@ use crate::layout;
 use crate::play::{PlayState, dynamic_ids, floor_y, step_vertical};
 use crate::recent;
 use crate::status::{ConsoleFilter, LogEntry};
-use crate::tools::{EntityTemplate, TransformMode};
+use crate::tools::{EntityTemplate, TransformMode, TransformSpace};
 use crate::view3d::{Camera3D, Drag3D, ViewMode};
 use crate::{hierarchy, inspector};
 
@@ -57,8 +57,9 @@ pub(crate) struct EditorApp {
     pub(crate) rotation_degrees: [f32; 3],
     pub(crate) scale: [f32; 3],
     pub(crate) component_edit: Option<ComponentEdit>,
-    /// Última entidad usada como ancla para la selección por rango (E12).
-    selection_anchor: Option<u64>,
+    /// Última entidad usada como ancla para la selección por rango (E12) y
+    /// como origen del gizmo en espacio local (E14).
+    pub(crate) selection_anchor: Option<u64>,
     /// Portapapeles en memoria (E13): no se guarda en la escena y sobrevive a
     /// abrir otra o crear una nueva.
     clipboard: Vec<SceneEntity>,
@@ -85,6 +86,8 @@ pub(crate) struct EditorApp {
     pub(crate) show_grid: bool,
     pub(crate) snap: bool,
     pub(crate) transform_mode: TransformMode,
+    /// Espacio del gizmo de grupo (E14), persistido con el resto de preferencias.
+    pub(crate) transform_space: TransformSpace,
     pub(crate) drag: CanvasDrag,
     pub(crate) preview: HashMap<u64, Transform>,
     pub(crate) play_state: PlayState,
@@ -162,6 +165,7 @@ impl EditorApp {
             show_grid: settings.show_grid,
             snap: settings.snap,
             transform_mode: TransformMode::default(),
+            transform_space: settings.transform_space,
             drag: CanvasDrag::None,
             preview: HashMap::new(),
             play_state: PlayState::Stopped,
@@ -252,6 +256,7 @@ impl EditorApp {
             zoom: self.zoom,
             show_grid: self.show_grid,
             snap: self.snap,
+            transform_space: self.transform_space,
         };
         let _ = crate::settings::save(&settings);
     }
@@ -732,6 +737,7 @@ impl EditorApp {
             move_tool: input.key_pressed(egui::Key::W),
             rotate_tool: input.key_pressed(egui::Key::E),
             scale_tool: input.key_pressed(egui::Key::R),
+            toggle_space: input.key_pressed(egui::Key::Q),
             toggle_play: input.key_pressed(egui::Key::Space),
             stop_play: input.key_pressed(egui::Key::Escape),
         });
@@ -788,6 +794,11 @@ impl EditorApp {
         }
         if actions.scale_tool {
             self.transform_mode = TransformMode::Scale;
+        }
+        if actions.toggle_space {
+            self.transform_space = self.transform_space.toggle();
+            self.save_settings();
+            self.set_status(format!("Gizmo en espacio {}", self.transform_space.label()));
         }
         if self.view_mode == ViewMode::ThreeD && (actions.rotate_tool || actions.scale_tool) {
             self.set_status("En la vista 3D, rotar y escalar se hacen desde el inspector");

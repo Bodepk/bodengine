@@ -7,8 +7,9 @@ use egui::{Color32, PointerButton, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use lunar_scenes::{Component, SceneEntity, Transform};
 
 use crate::app::EditorApp;
+use crate::gizmo::{Originals, group_pivot, space_axes, translate_group};
 use crate::play::PlayState;
-use crate::tools::TransformMode;
+use crate::tools::{TransformMode, TransformSpace};
 
 const GIZMO_LENGTH: f32 = 2.0;
 const PICK_RADIUS: f32 = 8.0;
@@ -67,14 +68,6 @@ pub(crate) enum Axis {
 }
 
 impl Axis {
-    pub(crate) fn index(self) -> usize {
-        match self {
-            Self::X => 0,
-            Self::Y => 1,
-            Self::Z => 2,
-        }
-    }
-
     pub(crate) fn vector(self) -> [f32; 3] {
         match self {
             Self::X => [1.0, 0.0, 0.0],
@@ -98,10 +91,13 @@ pub(crate) enum Drag3D {
     #[default]
     None,
     Gizmo {
-        id: u64,
         pointer: Pos2,
-        axis: Axis,
-        original: Transform,
+        /// Origen del gizmo en el momento de empezar el arrastre.
+        pivot: [f32; 3],
+        /// Vector unitario del eje en el espacio elegido (E14).
+        vector: [f32; 3],
+        /// Todas las entidades selectas; un solo `SetTransforms` al soltar.
+        originals: Originals,
     },
 }
 
@@ -267,20 +263,15 @@ pub(crate) fn point_segment_distance(point: Pos2, start: Pos2, end: Pos2) -> f32
     point.distance(start + segment * t)
 }
 
-/// Desplazamiento en pantalla de la punta de un eje respecto a su origen.
+/// Desplazamiento en pantalla de la punta de un vector unitario respecto a su origen.
 #[must_use]
-pub(crate) fn axis_screen_delta(
+pub(crate) fn axis_screen_delta_vector(
     camera: Camera3D,
     rect: Rect,
     center: [f32; 3],
-    axis: Axis,
+    vector: [f32; 3],
 ) -> Option<Vec2> {
-    let vector = axis.vector();
-    let tip = [
-        center[0] + vector[0] * GIZMO_LENGTH,
-        center[1] + vector[1] * GIZMO_LENGTH,
-        center[2] + vector[2] * GIZMO_LENGTH,
-    ];
+    let tip = add(center, scale(vector, GIZMO_LENGTH));
     Some(project(tip, camera, rect)? - project(center, camera, rect)?)
 }
 
@@ -294,41 +285,25 @@ pub(crate) fn translation_from_drag(delta: Vec2, axis_screen: Vec2) -> Option<f3
     Some(delta.dot(axis_screen) / length_sq * GIZMO_LENGTH)
 }
 
-/// Traslación resultante, opcionalmente ajustada a la rejilla de 0.25 unidades.
+/// Índice del vector del gizmo bajo el puntero, si hay alguno a `PICK_RADIUS`
+/// píxeles. Acepta ejes de mundo o del espacio local (E14).
 #[must_use]
-pub(crate) fn translate_axis(
-    original: Transform,
-    axis: Axis,
-    amount: f32,
-    snap: bool,
-) -> Transform {
-    let mut transform = original;
-    let value = transform.translation[axis.index()] + amount;
-    transform.translation[axis.index()] = if snap {
-        (value * 4.0).round() / 4.0
-    } else {
-        value
-    };
-    transform
-}
-
-/// Eje del gizmo bajo el puntero, si hay alguno a `PICK_RADIUS` píxeles.
-#[must_use]
-pub(crate) fn pick_axis(
+pub(crate) fn pick_axis_vector(
     camera: Camera3D,
     rect: Rect,
     pointer: Pos2,
     center: [f32; 3],
-) -> Option<Axis> {
+    vectors: [[f32; 3]; 3],
+) -> Option<usize> {
     let origin = project(center, camera, rect)?;
     let mut closest = None;
     let mut best = PICK_RADIUS;
-    for axis in [Axis::X, Axis::Y, Axis::Z] {
-        let delta = axis_screen_delta(camera, rect, center, axis)?;
+    for (index, vector) in vectors.into_iter().enumerate() {
+        let delta = axis_screen_delta_vector(camera, rect, center, vector)?;
         let distance = point_segment_distance(pointer, origin, origin + delta);
         if distance < best {
             best = distance;
-            closest = Some(axis);
+            closest = Some(index);
         }
     }
     closest
@@ -480,36 +455,47 @@ fn paint_entities(app: &EditorApp, ui: &mut Ui, rect: Rect, camera: Camera3D) {
     }
 }
 
-fn selected_entity(app: &EditorApp) -> Option<(u64, Transform)> {
+/// Transformaciones visibles de toda la selección, en orden de jerarquía.
+#[must_use]
+fn selection_transforms(app: &EditorApp) -> Originals {
     let selection = app.document.selection();
-    if selection.len() != 1 {
-        return None;
-    }
-    let id = selection[0];
     app.document
         .scene()
         .entities
         .iter()
-        .find(|entity| entity.id == id)
-        .map(|entity| (id, displayed_transform(app, entity)))
+        .filter(|entity| selection.contains(&entity.id))
+        .map(|entity| (entity.id, displayed_transform(app, entity)))
+        .collect()
+}
+
+/// Rotación del ancla, usada para orientar los ejes en espacio local.
+fn reference_rotation(app: &EditorApp, originals: &Originals) -> [f32; 4] {
+    crate::gizmo::reference(originals, app.selection_anchor)
+        .map_or([0.0, 0.0, 0.0, 1.0], |(_, transform)| transform.rotation)
 }
 
 fn paint_gizmo(app: &EditorApp, ui: &mut Ui, rect: Rect, camera: Camera3D) {
     if app.transform_mode != TransformMode::Move {
         return;
     }
-    let Some((_, transform)) = selected_entity(app) else {
+    let originals = selection_transforms(app);
+    let Some(pivot) = group_pivot(&originals, app.transform_space, app.selection_anchor) else {
         return;
     };
-    let Some(origin) = project(transform.translation, camera, rect) else {
+    let Some(origin) = project(pivot, camera, rect) else {
         return;
     };
-    for axis in [Axis::X, Axis::Y, Axis::Z] {
-        if let Some(delta) = axis_screen_delta(camera, rect, transform.translation, axis) {
+    let rotation = reference_rotation(app, &originals);
+    for (index, vector) in space_axes(app.transform_space, rotation)
+        .into_iter()
+        .enumerate()
+    {
+        if let Some(delta) = axis_screen_delta_vector(camera, rect, pivot, vector) {
+            let color = [Axis::X, Axis::Y, Axis::Z][index].color();
             let tip = origin + delta;
             ui.painter()
-                .line_segment([origin, tip], Stroke::new(2.0, axis.color()));
-            ui.painter().circle_filled(tip, 4.0, axis.color());
+                .line_segment([origin, tip], Stroke::new(2.0, color));
+            ui.painter().circle_filled(tip, 4.0, color);
         }
     }
 }
@@ -528,17 +514,22 @@ fn handle_selection(
         return;
     };
     if response.drag_started_by(PointerButton::Primary)
-        && let Some((id, transform)) = selected_entity(app)
         && app.transform_mode == TransformMode::Move
         && app.ensure_editable()
-        && let Some(axis) = pick_axis(camera, rect, pointer, transform.translation)
     {
-        app.view3d_drag = Drag3D::Gizmo {
-            id,
-            pointer,
-            axis,
-            original: transform,
-        };
+        let originals = selection_transforms(app);
+        if let Some(pivot) = group_pivot(&originals, app.transform_space, app.selection_anchor) {
+            let rotation = reference_rotation(app, &originals);
+            let axes = space_axes(app.transform_space, rotation);
+            if let Some(index) = pick_axis_vector(camera, rect, pointer, pivot, axes) {
+                app.view3d_drag = Drag3D::Gizmo {
+                    pointer,
+                    pivot,
+                    vector: axes[index],
+                    originals,
+                };
+            }
+        }
     }
     if response.clicked() {
         let hit = app
@@ -566,10 +557,10 @@ fn handle_selection(
 
 fn apply_gizmo(app: &mut EditorApp, rect: Rect, camera: Camera3D, pointer: Option<Pos2>) {
     let Drag3D::Gizmo {
-        id,
         pointer: start,
-        axis,
-        original,
+        pivot,
+        vector,
+        ref originals,
     } = app.view3d_drag
     else {
         return;
@@ -577,12 +568,14 @@ fn apply_gizmo(app: &mut EditorApp, rect: Rect, camera: Camera3D, pointer: Optio
     let Some(pointer) = pointer else {
         return;
     };
-    let Some(axis_screen) = axis_screen_delta(camera, rect, original.translation, axis) else {
+    let Some(axis_screen) = axis_screen_delta_vector(camera, rect, pivot, vector) else {
         return;
     };
     if let Some(amount) = translation_from_drag(pointer - start, axis_screen) {
-        app.preview
-            .insert(id, translate_axis(original, axis, amount, app.snap));
+        let delta = scale(vector, amount);
+        for (id, transform) in translate_group(originals, delta, app.snap) {
+            app.preview.insert(id, transform);
+        }
     }
 }
 
@@ -625,8 +618,23 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
         ui.label("Vista 3D");
         ui.label(format!("Distancia {:.1}", app.camera3d.distance));
         ui.label("Derecho orbitar · central desplazar · rueda zoom");
+        ui.separator();
+        if ui
+            .selectable_label(app.transform_space == TransformSpace::Global, "Global (Q)")
+            .clicked()
+        {
+            app.transform_space = TransformSpace::Global;
+            app.save_settings();
+        }
+        if ui
+            .selectable_label(app.transform_space == TransformSpace::Local, "Local (Q)")
+            .clicked()
+        {
+            app.transform_space = TransformSpace::Local;
+            app.save_settings();
+        }
         ui.label(if app.transform_mode == TransformMode::Move {
-            "Arrastra los ejes para trasladar"
+            "Arrastra los ejes del grupo para trasladar"
         } else {
             "Rotar/escalar desde el inspector"
         });
@@ -727,11 +735,12 @@ mod tests {
     fn the_axis_under_the_pointer_is_picked() {
         let camera = Camera3D::default();
         let center = [0.0; 3];
-        let delta = axis_screen_delta(camera, rect(), center, Axis::X).unwrap();
+        let axes = [Axis::X, Axis::Y, Axis::Z].map(Axis::vector);
+        let delta = axis_screen_delta_vector(camera, rect(), center, axes[0]).unwrap();
         let tip = project(center, camera, rect()).unwrap() + delta;
-        assert_eq!(pick_axis(camera, rect(), tip, center), Some(Axis::X));
+        assert_eq!(pick_axis_vector(camera, rect(), tip, center, axes), Some(0));
         assert_eq!(
-            pick_axis(camera, rect(), Pos2::new(-500.0, -500.0), center),
+            pick_axis_vector(camera, rect(), Pos2::new(-500.0, -500.0), center, axes),
             None
         );
     }
@@ -745,19 +754,6 @@ mod tests {
         assert_eq!(
             translation_from_drag(Vec2::new(50.0, 0.0), Vec2::ZERO),
             None
-        );
-    }
-
-    #[test]
-    fn snapping_rounds_to_quarter_units() {
-        let original = Transform::default();
-        assert_eq!(
-            translate_axis(original, Axis::Y, 0.13, true).translation[1],
-            0.25
-        );
-        assert_eq!(
-            translate_axis(original, Axis::Y, 0.13, false).translation[1],
-            0.13
         );
     }
 
@@ -777,8 +773,8 @@ mod tests {
         app.document = EditorDocument::new();
         app.apply(EditorCommand::CreateEntity { id: 1, name: None });
         let original = app.document.scene().entities[0].transform;
-        let moved = translate_axis(original, Axis::X, 1.5, false);
-        app.preview.insert(1, moved);
+        let moved = translate_group(&[(1, original)], [1.5, 0.0, 0.0], false);
+        app.preview.insert(1, moved[0].1);
         let history = app.document.undo_len();
         crate::canvas::commit_preview(&mut app);
         assert!(app.preview.is_empty());
@@ -789,6 +785,21 @@ mod tests {
         assert_eq!(app.document.undo_len(), history + 1);
         app.undo();
         assert_eq!(app.document.scene().entities[0].transform, original);
+    }
+
+    #[test]
+    fn the_local_axes_are_picked_at_their_rotated_tip() {
+        let camera = Camera3D::default();
+        let center = [0.0; 3];
+        let rotation = crate::helpers::quaternion_from_angle(std::f32::consts::FRAC_PI_2);
+        let axes = space_axes(TransformSpace::Local, rotation);
+        let tip = project(center, camera, rect()).unwrap()
+            + axis_screen_delta_vector(camera, rect(), center, axes[0]).unwrap();
+        assert_eq!(pick_axis_vector(camera, rect(), tip, center, axes), Some(0));
+        assert_eq!(
+            pick_axis_vector(camera, rect(), Pos2::new(-500.0, -500.0), center, axes),
+            None
+        );
     }
 
     #[test]
@@ -810,7 +821,7 @@ mod tests {
     fn marker_cross_is_pickable() {
         let camera = Camera3D::default();
         let origin = project([0.0; 3], camera, rect()).unwrap();
-        let delta = axis_screen_delta(camera, rect(), [0.0; 3], Axis::X).unwrap();
+        let delta = axis_screen_delta_vector(camera, rect(), [0.0; 3], Axis::X.vector()).unwrap();
         assert!(marker_hit(camera, rect(), origin + delta * 0.3, [0.0; 3]));
         assert!(!marker_hit(
             camera,
@@ -861,5 +872,7 @@ mod tests {
         );
         assert!(texts.iter().any(|text| text.contains("Restablecer cámara")));
         assert!(texts.iter().any(|text| text.contains("Derecho orbitar")));
+        assert!(texts.iter().any(|text| text == "Global (Q)"));
+        assert!(texts.iter().any(|text| text == "Local (Q)"));
     }
 }

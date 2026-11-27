@@ -29,6 +29,34 @@ impl TransformMode {
     }
 }
 
+/// Espacio de coordenadas del gizmo (E14). `Global` coloca el tirador en el
+/// centro del grupo y alinea los ejes con el mundo; `Local` lo coloca en el
+/// origen de la entidad ancla y gira los ejes con ella.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum TransformSpace {
+    #[default]
+    Global,
+    Local,
+}
+
+impl TransformSpace {
+    #[must_use]
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Global => "Global",
+            Self::Local => "Local",
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn toggle(self) -> Self {
+        match self {
+            Self::Global => Self::Local,
+            Self::Local => Self::Global,
+        }
+    }
+}
+
 /// Plantilla ofrecida en el menú «Crear» de la jerarquía.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntityTemplate {
@@ -102,6 +130,15 @@ mod tests {
         assert_eq!(TransformMode::Move.label(), "Mover (W)");
         assert_eq!(TransformMode::Rotate.label(), "Rotar (E)");
         assert_eq!(TransformMode::Scale.label(), "Escalar (R)");
+    }
+
+    #[test]
+    fn global_is_the_default_space_and_toggles() {
+        assert_eq!(TransformSpace::default(), TransformSpace::Global);
+        assert_eq!(TransformSpace::Global.label(), "Global");
+        assert_eq!(TransformSpace::Local.label(), "Local");
+        assert_eq!(TransformSpace::Global.toggle(), TransformSpace::Local);
+        assert_eq!(TransformSpace::Local.toggle(), TransformSpace::Global);
     }
 
     #[test]
