@@ -7,6 +7,9 @@
 use egui::{Color32, Context, Ui};
 
 use crate::app::EditorApp;
+use crate::console::{
+    CommandOutcome, complete, execute, history_back, history_forward, parse, remember,
+};
 
 /// Número máximo de entradas conservadas en el historial.
 pub(crate) const MAX_LOG: usize = 50;
@@ -239,6 +242,69 @@ pub(crate) fn console_ui(app: &mut EditorApp, ui: &mut Ui) {
             .hint_text("Buscar en consola…")
             .desired_width(220.0),
     );
+
+    let mut submit = false;
+    let mut previous = false;
+    let mut next = false;
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(">");
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut app.console_input)
+                .hint_text("Escribe un comando…")
+                .desired_width(220.0),
+        );
+        if ui.button("Completar").clicked()
+            && let Some(completed) = complete(&app.console_input)
+        {
+            app.console_input = completed;
+        }
+        if ui.button("Ejecutar").clicked() {
+            submit = true;
+        }
+        if response.has_focus() {
+            previous = ui.input(|input| input.key_pressed(egui::Key::ArrowUp));
+            next = ui.input(|input| input.key_pressed(egui::Key::ArrowDown));
+            submit |= ui.input(|input| input.key_pressed(egui::Key::Enter));
+        }
+    });
+    if previous {
+        if app.console_history_index.is_none() {
+            app.console_draft = app.console_input.clone();
+        }
+        history_back(
+            &app.console_history,
+            &mut app.console_history_index,
+            &mut app.console_input,
+        );
+    }
+    if next {
+        history_forward(
+            &app.console_history,
+            &mut app.console_history_index,
+            &mut app.console_input,
+            &app.console_draft,
+        );
+    }
+    if submit {
+        let line = app.console_input.trim().to_owned();
+        if !line.is_empty() {
+            remember(&mut app.console_history, &line);
+            app.console_history_index = None;
+            app.console_draft.clear();
+            app.set_status(format!("> {line}"));
+            let outcome = match parse(&line) {
+                Ok(command) => execute(app, command),
+                Err(error) => CommandOutcome {
+                    level: Level::Error,
+                    message: error,
+                },
+            };
+            app.set_status_level(outcome.level, outcome.message);
+        }
+        app.console_input.clear();
+    }
+
     let visible = visible_entries(&app.status_log, filter, &app.console_search);
     ui.label(format!(
         "{} de {} mensaje(s)",
@@ -369,6 +435,9 @@ mod tests {
         assert!(texts.iter().any(|text| text.contains("Buscar en consola")));
         assert!(texts.iter().any(|text| text.contains("Copiar")));
         assert!(texts.iter().any(|text| text.contains("mensaje(s)")));
+        assert!(texts.iter().any(|text| text.contains("Escribe un comando")));
+        assert!(texts.iter().any(|text| text == "Completar"));
+        assert!(texts.iter().any(|text| text == "Ejecutar"));
     }
 
     #[test]

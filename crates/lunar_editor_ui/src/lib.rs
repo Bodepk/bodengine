@@ -9,6 +9,7 @@ mod assets;
 mod canvas;
 mod components;
 mod config;
+mod console;
 mod dialogs;
 mod dnd;
 mod file_picker;

@@ -54,6 +54,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [035](ADR-035-prefabs-editor.md) | Prefabs en el editor | Aceptada |
 | [036](ADR-036-import-options-reimport.md) | Opciones de importación y reimportado | Aceptada |
 | [038](ADR-038-content-browser-vistas-dnd.md) | Vistas del content browser y DnD tipado | Aceptada |
+| [039](ADR-039-consola-comandos-editor.md) | Consola de comandos del editor | Aceptada |
 
 ## Consecuencias
 

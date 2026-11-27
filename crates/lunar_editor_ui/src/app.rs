@@ -75,6 +75,11 @@ pub(crate) struct EditorApp {
     pub(crate) status_log: Vec<LogEntry>,
     pub(crate) console_filter: ConsoleFilter,
     pub(crate) console_search: String,
+    /// Línea en curso, historial y navegación de la consola de comandos (E19).
+    pub(crate) console_input: String,
+    pub(crate) console_history: Vec<String>,
+    pub(crate) console_history_index: Option<usize>,
+    pub(crate) console_draft: String,
     pub(crate) show_log: bool,
     start_time: Instant,
     pub(crate) assets: AssetLibrary,
@@ -168,6 +173,10 @@ impl EditorApp {
             status_log,
             console_filter: ConsoleFilter::default(),
             console_search: String::new(),
+            console_input: String::new(),
+            console_history: Vec::new(),
+            console_history_index: None,
+            console_draft: String::new(),
             show_log: false,
             start_time,
             assets,
@@ -240,15 +249,25 @@ impl EditorApp {
     }
 
     pub(crate) fn apply(&mut self, command: EditorCommand) {
+        let _ = self.try_apply(command);
+    }
+
+    /// Igual que `apply`, pero devuelve el error para la consola de comandos.
+    pub(crate) fn try_apply(&mut self, command: EditorCommand) -> Result<(), String> {
         if !self.ensure_editable() {
-            return;
+            return Err("Detén la simulación antes de editar".to_owned());
         }
         match self.document.apply(command) {
             Ok(()) => {
                 self.revision += 1;
                 self.set_status("");
+                Ok(())
             }
-            Err(error) => self.set_status(error.to_string()),
+            Err(error) => {
+                let message = error.to_string();
+                self.set_status_level(crate::status::Level::Error, message.clone());
+                Err(message)
+            }
         }
     }
 
@@ -429,6 +448,58 @@ impl EditorApp {
                 self.set_status(format!("No se pudo guardar {path:?}: {error}"));
                 false
             }
+        }
+    }
+
+    /// Guardado usado por la consola: no escribe en `status_log` para que el
+    /// resultado del comando sea el único mensaje registrado.
+    pub(crate) fn console_save(&mut self, path: Option<&str>) -> Result<String, String> {
+        if !self.ensure_editable() {
+            return Err("Detén la simulación antes de editar".to_owned());
+        }
+        let target = path.map(PathBuf::from).unwrap_or_else(|| self.path.clone());
+        if target.as_os_str().is_empty() {
+            return Err("La escena no tiene ruta: usa save <ruta>".to_owned());
+        }
+        self.refresh_guids();
+        let (rewritten, broken) = self.rewrite_asset_paths();
+        let suffix = Self::describe_guid_changes(rewritten, &broken);
+        match self.document.save_to_path(&target) {
+            Ok(()) => {
+                self.path = target.clone();
+                self.remember(target.clone());
+                Ok(format!("Guardada {target:?}{suffix}"))
+            }
+            Err(error) => Err(format!("No se pudo guardar {target:?}: {error}")),
+        }
+    }
+
+    /// Apertura usada por la consola; respeta el aviso de cambios sin guardar.
+    pub(crate) fn console_load(&mut self, text: &str) -> Result<String, String> {
+        if !self.ensure_editable() {
+            return Err("Detén la simulación antes de editar".to_owned());
+        }
+        let path = PathBuf::from(text);
+        if self.document.is_dirty() {
+            self.pending_action = Some(PendingAction::Open(path));
+            return Ok("Cambios sin guardar: confirma antes de abrir otra escena".to_owned());
+        }
+        match EditorDocument::load_from_path(&path) {
+            Ok(document) => {
+                self.document = document;
+                self.selection_anchor = None;
+                self.path = path.clone();
+                self.path_text = path.to_string_lossy().into_owned();
+                self.preview.clear();
+                self.drag = CanvasDrag::None;
+                self.revision += 1;
+                self.refresh_guids();
+                let (rewritten, broken) = self.rewrite_asset_paths();
+                let suffix = Self::describe_guid_changes(rewritten, &broken);
+                self.remember(path.clone());
+                Ok(format!("Abierta {path:?}{suffix}"))
+            }
+            Err(error) => Err(format!("No se pudo abrir {path:?}: {error}")),
         }
     }
 
