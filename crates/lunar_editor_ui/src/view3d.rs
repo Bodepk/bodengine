@@ -40,6 +40,35 @@ impl ViewMode {
     }
 }
 
+/// Relleno de la vista 3D. El modo inicial conserva la vista alámbrica de ADR-032.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ShadingMode {
+    #[default]
+    Wireframe,
+    Solid,
+    Lit,
+}
+
+impl ShadingMode {
+    pub(crate) const ALL: [Self; 3] = [Self::Wireframe, Self::Solid, Self::Lit];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Wireframe => "Alámbrico",
+            Self::Solid => "Sólido",
+            Self::Lit => "Iluminado",
+        }
+    }
+
+    fn fills(self) -> bool {
+        self != Self::Wireframe
+    }
+
+    fn lit(self) -> bool {
+        self == Self::Lit
+    }
+}
+
 /// Cámara orbital: ángulos en radianes, distancia al objetivo y objetivo.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Camera3D {
@@ -204,6 +233,16 @@ pub(crate) fn rotate(vector: [f32; 3], quaternion: [f32; 4]) -> [f32; 3] {
     add(add(vector, scale(twice, quaternion[3])), cross(axis, twice))
 }
 
+/// Caras de la caja unitaria con su normal local hacia fuera (ADR-037).
+pub(crate) const FACES: [([usize; 4], [f32; 3]); 6] = [
+    ([1, 2, 6, 5], [1.0, 0.0, 0.0]),
+    ([0, 4, 7, 3], [-1.0, 0.0, 0.0]),
+    ([3, 7, 6, 2], [0.0, 1.0, 0.0]),
+    ([0, 1, 5, 4], [0.0, -1.0, 0.0]),
+    ([4, 5, 6, 7], [0.0, 0.0, 1.0]),
+    ([0, 3, 2, 1], [0.0, 0.0, -1.0]),
+];
+
 const CORNERS: [[f32; 3]; 8] = [
     [-1.0, -1.0, -1.0],
     [1.0, -1.0, -1.0],
@@ -241,6 +280,79 @@ pub(crate) fn box_corners(transform: Transform) -> [[f32; 3]; 8] {
         corners[index] = add(transform.translation, rotate(local, transform.rotation));
     }
     corners
+}
+
+/// Cara proyectada, lista para pintar con el `Painter` de egui.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FaceDraw {
+    pub(crate) points: [Pos2; 4],
+    pub(crate) color: Color32,
+    pub(crate) depth: f32,
+}
+
+/// Factor de luz direccional, con suelo para que las caras ocultas no sean negras.
+#[must_use]
+pub(crate) fn shade_factor(normal: [f32; 3]) -> f32 {
+    let light = normalize([-0.4, 0.8, 0.6]);
+    let diffuse = dot(normalize(normal), light).max(0.0);
+    (0.35 + 0.65 * diffuse).clamp(0.0, 1.0)
+}
+
+/// Aplica el factor de sombreado a un color sin alterar su alfa.
+#[must_use]
+pub(crate) fn shade_color(base: Color32, factor: f32) -> Color32 {
+    let factor = factor.clamp(0.0, 1.0);
+    let channel = |value: u8| (f32::from(value) * factor).round() as u8;
+    Color32::from_rgba_premultiplied(
+        channel(base.r()),
+        channel(base.g()),
+        channel(base.b()),
+        base.a(),
+    )
+}
+
+/// Caras visibles de una caja, ordenadas de lejos a cerca (ADR-037).
+#[must_use]
+pub(crate) fn shaded_faces(
+    transform: Transform,
+    camera: Camera3D,
+    rect: Rect,
+    base: Color32,
+    mode: ShadingMode,
+) -> Vec<FaceDraw> {
+    if !mode.fills() {
+        return Vec::new();
+    }
+    let corners = box_corners(transform);
+    let (_, _, forward) = basis(camera);
+    let origin = eye(camera);
+    let mut faces = Vec::with_capacity(FACES.len());
+    for (indices, local_normal) in FACES {
+        let projected = indices.map(|index| project(corners[index], camera, rect));
+        let [Some(a), Some(b), Some(c), Some(d)] = projected else {
+            continue;
+        };
+        let depth = indices
+            .iter()
+            .map(|index| dot(sub(corners[*index], origin), forward))
+            .sum::<f32>()
+            / 4.0;
+        if !depth.is_finite() {
+            continue;
+        }
+        let factor = if mode.lit() {
+            shade_factor(rotate(local_normal, transform.rotation))
+        } else {
+            1.0
+        };
+        faces.push(FaceDraw {
+            points: [a, b, c, d],
+            color: shade_color(base, factor),
+            depth,
+        });
+    }
+    faces.sort_by(|left, right| right.depth.total_cmp(&left.depth));
+    faces
 }
 
 /// Transformación que se debe dibujar: la simulación escribe en `preview`.
@@ -414,11 +526,45 @@ fn paint_axes(ui: &mut Ui, rect: Rect, camera: Camera3D) {
 }
 
 fn paint_entities(app: &EditorApp, ui: &mut Ui, rect: Rect, camera: Camera3D) {
+    if app.shading_mode.fills() {
+        let mut faces = Vec::new();
+        for entity in &app.document.scene().entities {
+            if is_marker(entity) {
+                continue;
+            }
+            let transform = displayed_transform(app, entity);
+            let selected = app.document.selection().contains(&entity.id);
+            faces.extend(shaded_faces(
+                transform,
+                camera,
+                rect,
+                color_for(entity, selected),
+                app.shading_mode,
+            ));
+        }
+        faces.sort_by(|left, right| right.depth.total_cmp(&left.depth));
+        for face in faces {
+            ui.painter().add(egui::Shape::convex_polygon(
+                face.points.to_vec(),
+                face.color,
+                Stroke::NONE,
+            ));
+        }
+    }
     for entity in &app.document.scene().entities {
         let transform = displayed_transform(app, entity);
         let selected = app.document.selection().contains(&entity.id);
         let color = color_for(entity, selected);
-        let stroke = Stroke::new(if selected { 2.0 } else { 1.0 }, color);
+        let stroke = Stroke::new(
+            if selected {
+                2.0
+            } else if app.shading_mode.fills() {
+                0.5
+            } else {
+                1.0
+            },
+            color,
+        );
         if is_marker(entity) {
             for axis in [Axis::X, Axis::Y, Axis::Z] {
                 let vector = scale(axis.vector(), 0.6);
@@ -615,8 +761,20 @@ fn handle_camera(app: &mut EditorApp, ui: &mut Ui, rect: Rect, response: &egui::
 
 /// Dibuja el panel central cuando el modo 3D está activo.
 pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label("Vista 3D");
+        egui::ComboBox::from_label("Sombreado")
+            .selected_text(app.shading_mode.label())
+            .show_ui(ui, |ui| {
+                for mode in ShadingMode::ALL {
+                    if ui
+                        .selectable_label(app.shading_mode == mode, mode.label())
+                        .clicked()
+                    {
+                        app.shading_mode = mode;
+                    }
+                }
+            });
         ui.label(format!("Distancia {:.1}", app.camera3d.distance));
         ui.label("Derecho orbitar · central desplazar · rueda zoom");
         ui.separator();
@@ -862,6 +1020,71 @@ mod tests {
     }
 
     #[test]
+    fn shading_modes_have_stable_labels_and_wireframe_has_no_faces() {
+        assert_eq!(ShadingMode::Wireframe.label(), "Alámbrico");
+        assert_eq!(ShadingMode::Solid.label(), "Sólido");
+        assert_eq!(ShadingMode::Lit.label(), "Iluminado");
+        assert_eq!(ShadingMode::default(), ShadingMode::Wireframe);
+        assert!(
+            shaded_faces(
+                Transform::default(),
+                Camera3D::default(),
+                rect(),
+                Color32::WHITE,
+                ShadingMode::Wireframe
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn lit_shading_depends_on_the_light_direction() {
+        assert!(shade_factor([0.0, 1.0, 0.0]) > shade_factor([0.0, -1.0, 0.0]));
+        assert!((shade_factor([0.0, -1.0, 0.0]) - 0.35).abs() < 0.001);
+        assert!((0.0..=1.0).contains(&shade_factor([f32::NAN; 3])));
+    }
+
+    #[test]
+    fn shaded_faces_are_ordered_back_to_front() {
+        let faces = shaded_faces(
+            Transform {
+                translation: [0.0, 0.0, 3.0],
+                ..Transform::default()
+            },
+            Camera3D::default(),
+            rect(),
+            Color32::WHITE,
+            ShadingMode::Solid,
+        );
+        assert_eq!(faces.len(), 6);
+        assert!(faces.windows(2).all(|pair| pair[0].depth >= pair[1].depth));
+        assert!(faces.iter().all(|face| face.color == Color32::WHITE));
+        assert!(faces.iter().all(|face| face.points.len() == 4));
+    }
+
+    #[test]
+    fn lit_faces_have_different_tones_and_solid_ones_do_not() {
+        let base = Color32::from_rgb(200, 160, 110);
+        let solid = shaded_faces(
+            Transform::default(),
+            Camera3D::default(),
+            rect(),
+            base,
+            ShadingMode::Solid,
+        );
+        let lit = shaded_faces(
+            Transform::default(),
+            Camera3D::default(),
+            rect(),
+            base,
+            ShadingMode::Lit,
+        );
+        assert!(solid.iter().all(|face| face.color == base));
+        assert!(lit.iter().any(|face| face.color != lit[0].color));
+        assert!(lit.iter().all(|face| face.color.a() == base.a()));
+    }
+
+    #[test]
     fn the_3d_panel_draws_camera_controls() {
         let ctx = egui::Context::default();
         let mut app = EditorApp::new(None, &ctx);
@@ -897,5 +1120,7 @@ mod tests {
         assert!(texts.iter().any(|text| text.contains("Derecho orbitar")));
         assert!(texts.iter().any(|text| text == "Global (Q)"));
         assert!(texts.iter().any(|text| text == "Local (Q)"));
+        assert!(texts.iter().any(|text| text.contains("Sombreado")));
+        assert!(texts.iter().any(|text| text == "Alámbrico"));
     }
 }

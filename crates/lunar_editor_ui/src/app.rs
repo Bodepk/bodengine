@@ -104,6 +104,8 @@ pub(crate) struct EditorApp {
     script_diag_stamp: u64,
     script_last_poll: u64,
     pub(crate) view_mode: ViewMode,
+    /// Relleno de la vista 3D (ADR-037); no se persiste, como la cámara.
+    pub(crate) shading_mode: crate::view3d::ShadingMode,
     pub(crate) camera3d: Camera3D,
     pub(crate) view3d_drag: Drag3D,
     pub(crate) view_center: [f32; 2],
@@ -204,6 +206,7 @@ impl EditorApp {
             script_diag_stamp: 0,
             script_last_poll: 0,
             view_mode: ViewMode::default(),
+            shading_mode: crate::view3d::ShadingMode::default(),
             camera3d: Camera3D::default(),
             view3d_drag: Drag3D::default(),
             view_center: settings.center,
