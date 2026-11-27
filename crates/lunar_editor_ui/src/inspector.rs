@@ -6,8 +6,19 @@ use crate::app::{ComponentEdit, EditorApp};
 use crate::components::component_editor_ui;
 use crate::helpers::{
     audio_component, collider2_component, component_label, drag_array, image_component,
-    prefab_component, quaternion_from_degrees, sprite_component,
+    prefab_component, quaternion_from_degrees, snap_degrees, snap_scale, snap_to_grid,
+    sprite_component,
 };
+
+/// Cuantiza los buffers del inspector con las reglas de ADR-041.
+pub(crate) fn snap_transform_buffers(app: &mut EditorApp) {
+    if !app.snap {
+        return;
+    }
+    app.translation = app.translation.map(snap_to_grid);
+    app.rotation_degrees = app.rotation_degrees.map(snap_degrees);
+    app.scale = app.scale.map(snap_scale);
+}
 
 pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
     let Some(id) = app.document.selection().first().copied() else {
@@ -54,6 +65,7 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
     changed |= drag_array(ui, "Rotación (°)", &mut app.rotation_degrees, 1.0);
     changed |= drag_array(ui, "Escala", &mut app.scale, 0.05);
     if changed {
+        snap_transform_buffers(app);
         app.rotation = quaternion_from_degrees(app.rotation_degrees);
         app.apply(EditorCommand::SetTransform {
             id,
@@ -247,6 +259,25 @@ pub(crate) fn inspector_ui(app: &mut EditorApp, ui: &mut Ui) {
 mod tests {
     use super::*;
     use egui::{Pos2, Rect};
+
+    #[test]
+    fn snap_transform_buffers_quantizes_position_rotation_and_scale() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.snap = true;
+        app.translation = [1.13, -0.12, 2.0];
+        app.rotation_degrees = [22.0, -37.0, 90.0];
+        app.scale = [0.1, 1.13, 2.0];
+        snap_transform_buffers(&mut app);
+        assert_eq!(app.translation, [1.25, 0.0, 2.0]);
+        assert_eq!(app.rotation_degrees, [15.0, -30.0, 90.0]);
+        assert_eq!(app.scale, [0.25, 1.25, 2.0]);
+
+        app.translation = [1.13; 3];
+        app.snap = false;
+        snap_transform_buffers(&mut app);
+        assert_eq!(app.translation, [1.13; 3]);
+    }
 
     #[test]
     fn multi_selection_shows_which_entity_the_inspector_edits() {

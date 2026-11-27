@@ -98,7 +98,7 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
     let mut preferences_changed = false;
     ui.horizontal(|ui| {
         preferences_changed |= ui.checkbox(&mut app.show_grid, "Rejilla").changed();
-        preferences_changed |= ui.checkbox(&mut app.snap, "Snap 0.25").changed();
+        preferences_changed |= ui.checkbox(&mut app.snap, "Snap 0.25 / 15°").changed();
         ui.label(format!("Zoom {:.0}", app.zoom));
         ui.label(format!("Herramienta: {}", app.transform_mode.label()));
         ui.separator();
@@ -733,7 +733,9 @@ fn handle_pointer(
             if let Some(pointer) = pointer {
                 let start_distance = (start - center).length().max(1.0);
                 let factor = ((pointer - center).length() / start_distance).clamp(0.1, 10.0);
-                for (id, transform) in crate::gizmo::scale_group(&originals, pivot, factor) {
+                for (id, transform) in
+                    crate::gizmo::scale_group(&originals, pivot, factor, app.snap)
+                {
                     app.preview.insert(id, transform);
                 }
             }
@@ -748,7 +750,7 @@ fn handle_pointer(
                 let start_angle = (start.y - center.y).atan2(start.x - center.x);
                 let angle = (pointer.y - center.y).atan2(pointer.x - center.x);
                 for (id, transform) in
-                    crate::gizmo::rotate_group(&originals, pivot, -(angle - start_angle))
+                    crate::gizmo::rotate_group(&originals, pivot, -(angle - start_angle), app.snap)
                 {
                     app.preview.insert(id, transform);
                 }
@@ -1216,7 +1218,7 @@ mod tests {
             .collect();
         let history = app.document.undo_len();
         for (id, transform) in
-            crate::gizmo::rotate_group(&originals, [1.0, 0.0], std::f32::consts::FRAC_PI_2)
+            crate::gizmo::rotate_group(&originals, [1.0, 0.0], std::f32::consts::FRAC_PI_2, false)
         {
             app.preview.insert(id, transform);
         }
@@ -1229,7 +1231,7 @@ mod tests {
         app.document.undo();
         assert_eq!(app.document.scene().entities[1].transform, originals[1].1);
 
-        for (id, transform) in crate::gizmo::scale_group(&originals, [1.0, 0.0], 2.0) {
+        for (id, transform) in crate::gizmo::scale_group(&originals, [1.0, 0.0], 2.0, false) {
             app.preview.insert(id, transform);
         }
         commit_preview(&mut app);

@@ -7,7 +7,7 @@
 
 use lunar_scenes::Transform;
 
-use crate::helpers::{angle_from_quaternion, quaternion_from_angle};
+use crate::helpers::{angle_from_quaternion, quaternion_from_angle, snap_angle, snap_scale};
 use crate::tools::TransformSpace;
 use crate::view3d::{Axis, rotate};
 
@@ -86,12 +86,14 @@ pub(crate) fn rotate_point(point: [f32; 2], pivot: [f32; 2], angle: f32) -> [f32
 }
 
 /// Rota el grupo en 2D: cada posición gira alrededor del pivote y cada entidad
-/// añade el mismo giro a su rotación local.
+/// añade el mismo giro a su rotación local. Con `snap`, la rotación resultante
+/// se cuantiza a 15° (ADR-041).
 #[must_use]
 pub(crate) fn rotate_group(
     originals: &[(u64, Transform)],
     pivot: [f32; 2],
     angle: f32,
+    snap: bool,
 ) -> Originals {
     originals
         .iter()
@@ -104,8 +106,8 @@ pub(crate) fn rotate_group(
             );
             next.translation[0] = x;
             next.translation[1] = y;
-            next.rotation =
-                quaternion_from_angle(angle_from_quaternion(transform.rotation) + angle);
+            let rotated = angle_from_quaternion(transform.rotation) + angle;
+            next.rotation = quaternion_from_angle(if snap { snap_angle(rotated) } else { rotated });
             (*id, next)
         })
         .collect()
@@ -113,12 +115,14 @@ pub(crate) fn rotate_group(
 
 /// Escala el grupo de forma uniforme alrededor del pivote. La escala es
 /// invariante a la orientación de los ejes, así que el espacio solo cambia el
-/// pivote; no se introduce cizalla en los componentes de la entidad.
+/// pivote; no se introduce cizalla en los componentes de la entidad. Con
+/// `snap`, la escala resultante se cuantiza a 0.25 (ADR-041).
 #[must_use]
 pub(crate) fn scale_group(
     originals: &[(u64, Transform)],
     pivot: [f32; 2],
     factor: f32,
+    snap: bool,
 ) -> Originals {
     originals
         .iter()
@@ -129,7 +133,8 @@ pub(crate) fn scale_group(
                     pivot[axis] + (transform.translation[axis] - pivot[axis]) * factor;
             }
             for value in &mut next.scale {
-                *value = (*value * factor).abs().max(0.01);
+                let scaled = (*value * factor).abs().max(0.01);
+                *value = if snap { snap_scale(scaled) } else { scaled };
             }
             (*id, next)
         })
@@ -234,7 +239,7 @@ mod tests {
     #[test]
     fn rotating_a_group_keeps_its_shape_and_adds_rotation() {
         let originals = entities();
-        let rotated = rotate_group(&originals, [1.0, 0.0], std::f32::consts::FRAC_PI_2);
+        let rotated = rotate_group(&originals, [1.0, 0.0], std::f32::consts::FRAC_PI_2, false);
         for (actual, expected) in [
             (rotated[0].1.translation, [1.0, -1.0, 0.0]),
             (rotated[1].1.translation, [1.0, 1.0, 0.0]),
@@ -250,10 +255,22 @@ mod tests {
     #[test]
     fn scaling_a_group_leaves_the_pivot_fixed() {
         let originals = entities();
-        let scaled = scale_group(&originals, [1.0, 0.0], 2.0);
+        let scaled = scale_group(&originals, [1.0, 0.0], 2.0, false);
         assert_eq!(scaled[0].1.translation, [-1.0, 0.0, 0.0]);
         assert_eq!(scaled[1].1.translation, [3.0, 0.0, 0.0]);
         assert_eq!(scaled[1].1.scale, [2.0; 3]);
+    }
+
+    #[test]
+    fn snapping_rotates_and_scales_groups_in_fixed_steps() {
+        let originals = entities();
+        let rotated = rotate_group(&originals, [1.0, 0.0], 0.28, true);
+        let angle = angle_from_quaternion(rotated[1].1.rotation);
+        assert!((angle - 45.0_f32.to_radians()).abs() < 1e-5, "{angle}");
+        let scaled = scale_group(&originals, [1.0, 0.0], 1.13, true);
+        assert_eq!(scaled[1].1.scale, [1.25; 3]);
+        let tiny = scale_group(&originals, [1.0, 0.0], 0.1, true);
+        assert_eq!(tiny[1].1.scale, [0.25; 3]);
     }
 
     #[test]

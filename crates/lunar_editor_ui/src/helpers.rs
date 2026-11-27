@@ -230,6 +230,8 @@ pub(crate) const PIXELS_PER_UNIT: f32 = 32.0;
 
 /// Paso de la rejilla y del snap, en unidades de mundo.
 pub(crate) const GRID_STEP: f32 = 0.25;
+/// Paso del snap de rotación, en grados (ADR-041).
+pub(crate) const SNAP_DEGREES: f32 = 15.0;
 
 /// Ángulo 2D en radianes de un cuaternión `(x, y, z, w)`.
 #[must_use]
@@ -301,6 +303,30 @@ pub(crate) fn contains_point(
 #[must_use]
 pub(crate) fn snap_to_grid(value: f32) -> f32 {
     (value / GRID_STEP).round() * GRID_STEP
+}
+
+/// Redondea grados al paso de 15°, saneando valores no finitos (ADR-041).
+#[must_use]
+pub(crate) fn snap_degrees(value: f32) -> f32 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    (value / SNAP_DEGREES).round() * SNAP_DEGREES
+}
+
+/// Redondea un ángulo en radianes al paso de 15°.
+#[must_use]
+pub(crate) fn snap_angle(radians: f32) -> f32 {
+    snap_degrees(radians.to_degrees()).to_radians()
+}
+
+/// Redondea una escala al paso de 0.25, sin llegar a cero (ADR-041).
+#[must_use]
+pub(crate) fn snap_scale(value: f32) -> f32 {
+    if !value.is_finite() {
+        return GRID_STEP;
+    }
+    ((value / GRID_STEP).round() * GRID_STEP).max(GRID_STEP)
 }
 
 #[cfg(test)]
@@ -404,6 +430,23 @@ mod tests {
     fn snap_uses_quarter_unit_step() {
         assert_eq!(snap_to_grid(1.13), 1.25);
         assert_eq!(snap_to_grid(-0.12), 0.0);
+    }
+
+    #[test]
+    fn snap_degrees_uses_fifteen_degree_steps() {
+        assert_eq!(snap_degrees(22.0), 15.0);
+        assert_eq!(snap_degrees(-37.0), -30.0);
+        assert_eq!(snap_degrees(f32::NAN), 0.0);
+        assert!(
+            (snap_angle(std::f32::consts::FRAC_PI_2) - std::f32::consts::FRAC_PI_2).abs() < 1e-6
+        );
+    }
+
+    #[test]
+    fn snap_scale_keeps_quarter_steps_and_never_zero() {
+        assert_eq!(snap_scale(1.13), 1.25);
+        assert_eq!(snap_scale(0.1), 0.25);
+        assert_eq!(snap_scale(f32::INFINITY), 0.25);
     }
 
     #[test]
