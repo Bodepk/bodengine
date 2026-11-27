@@ -4,7 +4,7 @@
 //! se van a insertar. Ninguna función muta la escena: las mutaciones pasan por
 //! `EditorDocument::apply` a través de `EditorApp`.
 
-use lunar_scenes::{Component, Scene, SceneEntity};
+use lunar_scenes::{Component, Scene, SceneEntity, Transform};
 
 use crate::helpers::next_entity_id;
 
@@ -98,6 +98,109 @@ pub(crate) fn instantiate(scene: &Scene, name: &str, count: usize) -> Vec<SceneE
         instances.extend(entities);
     }
     instances
+}
+
+/// Cambios que propagan una plantilla a sus instancias (E43, ADR-043).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct PrefabChanges {
+    pub(crate) transforms: Vec<(u64, Transform)>,
+    pub(crate) components: Vec<(u64, usize, Component)>,
+    /// Grupos omitidos porque su estructura no coincide con la plantilla.
+    pub(crate) skipped: usize,
+}
+
+/// Empareja cada instancia de `name` con su plantilla y calcula los cambios.
+///
+/// Las raíces se detectan por `PrefabRef` y sus descendientes se recorren en
+/// orden de jerarquía, sin atravesar otra raíz del mismo prefab. Un grupo con
+/// distinto número de entidades se omite: aplicar cambios posicionales a una
+/// jerarquía distinta sería silenciosamente incorrecto.
+#[must_use]
+pub(crate) fn propagate(scene: &Scene, name: &str) -> PrefabChanges {
+    let Some(prefab) = scene.prefabs.iter().find(|prefab| prefab.name == name) else {
+        return PrefabChanges::default();
+    };
+    let roots: Vec<u64> = scene
+        .entities
+        .iter()
+        .filter(|entity| {
+            entity.components.iter().any(|component| {
+                matches!(component, Component::PrefabRef { name: found } if found == name)
+            })
+        })
+        .map(|entity| entity.id)
+        .collect();
+    let mut changes = PrefabChanges::default();
+    for root in &roots {
+        let mut group = Vec::new();
+        collect_instance(scene, *root, *root, &roots, &mut group);
+        if group.len() != prefab.entities.len() {
+            changes.skipped += 1;
+            continue;
+        }
+        for (instance, template) in group.iter().zip(prefab.entities.iter()) {
+            let Some(entity) = scene.entities.iter().find(|entity| entity.id == *instance) else {
+                continue;
+            };
+            let transform = if *instance == *root {
+                // La traslación de la raíz es la colocación de la instancia;
+                // los cambios de rotación y escala sí se propagan.
+                Transform {
+                    translation: entity.transform.translation,
+                    rotation: template.transform.rotation,
+                    scale: template.transform.scale,
+                }
+            } else {
+                template.transform
+            };
+            changes.transforms.push((*instance, transform));
+            for (index, component) in template.components.iter().enumerate() {
+                if index >= entity.components.len()
+                    || matches!(component, Component::PrefabRef { .. })
+                    || matches!(
+                        entity.components.get(index),
+                        Some(Component::PrefabRef { .. })
+                    )
+                {
+                    continue;
+                }
+                changes
+                    .components
+                    .push((*instance, index, component.clone()));
+            }
+        }
+    }
+    changes
+}
+
+/// Copia de la selección, con sus descendientes, lista para sustituir una
+/// plantilla. Se limpian los `PrefabRef` para que la plantilla no herede la
+/// procedencia de la instancia que se está usando de ejemplo.
+#[must_use]
+pub(crate) fn template_from_scene(scene: &Scene, ids: &[u64]) -> Vec<SceneEntity> {
+    let mut group = Vec::new();
+    for id in ids {
+        collect_instance(scene, *id, *id, &[], &mut group);
+    }
+    let mut entities = crate::helpers::selection_entities(scene, &group);
+    for entity in &mut entities {
+        entity
+            .components
+            .retain(|component| !matches!(component, Component::PrefabRef { .. }));
+    }
+    entities
+}
+
+fn collect_instance(scene: &Scene, root: u64, id: u64, roots: &[u64], out: &mut Vec<u64>) {
+    if out.contains(&id) {
+        return;
+    }
+    out.push(id);
+    for entity in &scene.entities {
+        if entity.parent == Some(id) && entity.id != root && !roots.contains(&entity.id) {
+            collect_instance(scene, root, entity.id, roots, out);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -203,6 +306,113 @@ mod tests {
             entities[0].components,
             vec![Component::PrefabRef {
                 name: "otro".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn propagation_updates_components_and_descendant_transforms() {
+        let mut scene = scene_with_prefab();
+        scene.prefabs[0].entities[0].transform.rotation = [0.0, 0.707, 0.0, 0.707];
+        scene.prefabs[0].entities[1].transform.translation = [1.0, 2.0, 3.0];
+        scene.prefabs[0].entities[1]
+            .components
+            .push(Component::Audio {
+                asset: "sonido.wav".to_owned(),
+                volume: 0.5,
+                autoplay: false,
+            });
+        let mut instances = instantiate(&scene, "arbol", 1);
+        instances[0].transform.translation = [7.0, 0.0, 0.0];
+        instances[1].components.push(Component::Image {
+            asset: "viejo.png".to_owned(),
+        });
+        scene.entities.extend(instances);
+
+        let changes = propagate(&scene, "arbol");
+
+        assert_eq!(changes.skipped, 0);
+        let root = changes
+            .transforms
+            .iter()
+            .find(|(id, _)| *id == 2)
+            .map(|(_, transform)| *transform)
+            .expect("raíz");
+        assert_eq!(root.translation, [7.0, 0.0, 0.0]);
+        assert_eq!(root.rotation, [0.0, 0.707, 0.0, 0.707]);
+        let child = changes
+            .transforms
+            .iter()
+            .find(|(id, _)| *id == 3)
+            .map(|(_, transform)| *transform)
+            .expect("hijo");
+        assert_eq!(child.translation, [1.0, 2.0, 3.0]);
+        assert_eq!(
+            changes.components,
+            vec![(
+                3,
+                0,
+                Component::Audio {
+                    asset: "sonido.wav".to_owned(),
+                    volume: 0.5,
+                    autoplay: false,
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn instances_with_a_different_structure_are_skipped() {
+        let mut scene = scene_with_prefab();
+        let mut instances = instantiate(&scene, "arbol", 1);
+        let mut extra = SceneEntity::new(99);
+        extra.parent = Some(instances[0].id);
+        instances.push(extra);
+        scene.entities.extend(instances);
+
+        let changes = propagate(&scene, "arbol");
+
+        assert_eq!(changes.skipped, 1);
+        assert!(changes.transforms.is_empty());
+        assert!(changes.components.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_prefab_propagates_nothing() {
+        let scene = scene_with_prefab();
+        assert_eq!(propagate(&scene, "inexistente"), PrefabChanges::default());
+    }
+
+    #[test]
+    fn a_template_can_be_rebuilt_from_an_instance() {
+        let mut scene = scene_with_prefab();
+        let instances = instantiate(&scene, "arbol", 1);
+        let root_id = instances[0].id;
+        scene.entities.extend(instances);
+        let child = scene
+            .entities
+            .iter_mut()
+            .find(|entity| entity.parent == Some(root_id))
+            .expect("hijo");
+        child.transform.translation = [4.0, 5.0, 6.0];
+        child.components.push(Component::Audio {
+            asset: "sonido.wav".to_owned(),
+            volume: 0.5,
+            autoplay: false,
+        });
+
+        let template = template_from_scene(&scene, &[root_id]);
+
+        assert_eq!(template.len(), 2);
+        assert_eq!(template[0].components, Vec::new());
+        assert_eq!(template[1].parent, Some(template[0].id));
+        assert_eq!(template[1].transform.translation, [4.0, 5.0, 6.0]);
+        assert_eq!(
+            template[1].components,
+            vec![Component::Audio {
+                asset: "sonido.wav".to_owned(),
+                volume: 0.5,
+                autoplay: false,
             }]
         );
     }

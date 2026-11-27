@@ -101,6 +101,14 @@ pub(crate) fn hierarchy_ui(app: &mut EditorApp, ui: &mut Ui) {
                             app.instantiate_prefab(&name);
                             ui.close();
                         }
+                        if ui.button("Aplicar").clicked() {
+                            app.apply_prefab(&name);
+                            ui.close();
+                        }
+                        if ui.button("Actualizar").clicked() {
+                            app.update_prefab(&name);
+                            ui.close();
+                        }
                         if ui.button("×").clicked() {
                             app.delete_prefab(&name);
                             ui.close();

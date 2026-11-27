@@ -59,6 +59,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [040](ADR-040-scripts-map-diagnosticos.md) | Formato de scripts.map.txt y diagnósticos | Aceptada |
 | [041](ADR-041-snap-rotacion-escala.md) | Snap de rotación y escala en el editor | Aceptada |
 | [042](ADR-042-timeline-animaciones.md) | Timeline de animaciones en el editor | Aceptada |
+| [043](ADR-043-propagar-prefabs.md) | Propagar cambios de prefab a instancias | Aceptada |
 
 ## Consecuencias
 

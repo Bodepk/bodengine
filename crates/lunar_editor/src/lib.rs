@@ -96,6 +96,18 @@ pub enum EditorCommand {
     /// Es la forma en que un arrastre con multi-selección produce un único
     /// paso de undo. Un id desconocido invalida todo el comando.
     SetTransforms { transforms: Vec<(u64, Transform)> },
+    /// Propaga transformaciones y componentes de una plantilla a sus
+    /// instancias en un solo paso (E43, ADR-043).
+    ApplyPrefab {
+        name: String,
+        transforms: Vec<(u64, Transform)>,
+        components: Vec<(u64, usize, Component)>,
+    },
+    /// Sustituye las entidades de una plantilla existente (E43, ADR-043).
+    UpdatePrefab {
+        name: String,
+        entities: Vec<SceneEntity>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -460,6 +472,49 @@ fn mutate(
             for (id, transform) in transforms {
                 entity_mut(scene, *id)?.transform = *transform;
             }
+        }
+        EditorCommand::ApplyPrefab {
+            name,
+            transforms,
+            components,
+        } => {
+            if !scene.prefabs.iter().any(|prefab| prefab.name == *name) {
+                return Err(SceneError::UnknownPrefab(name.clone()).into());
+            }
+            // Validación completa antes de escribir: ni un id desconocido ni
+            // un índice inválido dejan una propagación a medias.
+            for (id, _) in transforms {
+                position_of(scene, *id)?;
+            }
+            for (id, index, _) in components {
+                let entity = entity_mut(scene, *id)?;
+                if *index >= entity.components.len() {
+                    return Err(EditorError::ComponentIndex {
+                        id: *id,
+                        index: *index,
+                    });
+                }
+            }
+            for (id, transform) in transforms {
+                entity_mut(scene, *id)?.transform = *transform;
+            }
+            for (id, index, component) in components {
+                entity_mut(scene, *id)?.components[*index] = component.clone();
+            }
+        }
+        EditorCommand::UpdatePrefab { name, entities } => {
+            let prefab = scene
+                .prefabs
+                .iter_mut()
+                .find(|prefab| prefab.name == *name)
+                .ok_or_else(|| SceneError::UnknownPrefab(name.clone()))?;
+            let mut ids = HashSet::with_capacity(entities.len());
+            for entity in entities {
+                if !ids.insert(entity.id) {
+                    return Err(SceneError::DuplicateEntity(entity.id).into());
+                }
+            }
+            prefab.entities = entities.clone();
         }
     }
     Ok(())
@@ -1315,6 +1370,91 @@ mod tests {
         assert!(document.scene().prefabs.is_empty());
         assert!(document.redo());
         assert_eq!(document.scene().prefabs.len(), 1);
+    }
+
+    #[test]
+    fn applying_prefab_changes_is_one_undoable_atomic_step() {
+        let mut document = chain_with_names();
+        let root = document.scene().entities[0].clone();
+        document
+            .apply(EditorCommand::SavePrefab {
+                name: "enemigo".to_owned(),
+                entities: vec![root.clone()],
+            })
+            .expect("save prefab");
+        let before = document.scene().clone();
+        let history = document.undo_len();
+        let transform = Transform {
+            translation: [5.0, 0.0, 0.0],
+            ..root.transform
+        };
+        assert_eq!(
+            document.apply(EditorCommand::ApplyPrefab {
+                name: "enemigo".to_owned(),
+                transforms: vec![(root.id, transform)],
+                components: vec![(
+                    root.id,
+                    9,
+                    Component::PrefabRef {
+                        name: "enemigo".to_owned()
+                    }
+                )],
+            }),
+            Err(EditorError::ComponentIndex {
+                id: root.id,
+                index: 9
+            })
+        );
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), history);
+
+        document
+            .apply(EditorCommand::ApplyPrefab {
+                name: "enemigo".to_owned(),
+                transforms: vec![(root.id, transform)],
+                components: Vec::new(),
+            })
+            .expect("apply prefab");
+        assert_eq!(document.scene().entities[0].transform, transform);
+        assert_eq!(document.undo_len(), history + 1);
+        assert!(document.undo());
+        assert_eq!(document.scene(), &before);
+    }
+
+    #[test]
+    fn updating_a_prefab_replaces_its_entities_and_is_undoable() {
+        let mut document = chain_with_names();
+        let original = document.scene().entities[0].clone();
+        document
+            .apply(EditorCommand::SavePrefab {
+                name: "enemigo".to_owned(),
+                entities: vec![original.clone()],
+            })
+            .expect("save prefab");
+        let before = document.scene().clone();
+        let history = document.undo_len();
+        let replacement = SceneEntity::new(77);
+
+        assert_eq!(
+            document.apply(EditorCommand::UpdatePrefab {
+                name: "desconocida".to_owned(),
+                entities: vec![replacement.clone()],
+            }),
+            Err(SceneError::UnknownPrefab("desconocida".to_owned()).into())
+        );
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), history);
+
+        document
+            .apply(EditorCommand::UpdatePrefab {
+                name: "enemigo".to_owned(),
+                entities: vec![replacement.clone()],
+            })
+            .expect("update prefab");
+        assert_eq!(document.scene().prefabs[0].entities, vec![replacement]);
+        assert_eq!(document.undo_len(), history + 1);
+        assert!(document.undo());
+        assert_eq!(document.scene(), &before);
     }
 
     #[test]

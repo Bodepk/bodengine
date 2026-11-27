@@ -836,6 +836,63 @@ impl EditorApp {
         }
     }
 
+    /// Aplica los cambios de una plantilla a sus instancias en un solo paso (E43).
+    pub(crate) fn apply_prefab(&mut self, name: &str) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let changes = crate::prefabs::propagate(self.document.scene(), name);
+        if changes.transforms.is_empty() && changes.components.is_empty() {
+            self.set_status(format!("No hay instancias de «{name}» que actualizar"));
+            return;
+        }
+        let skipped = changes.skipped;
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::ApplyPrefab {
+            name: name.to_owned(),
+            transforms: changes.transforms,
+            components: changes.components,
+        });
+        if self.document.undo_len() > history {
+            let message = if skipped == 0 {
+                format!("Actualizadas las instancias de «{name}»")
+            } else {
+                format!(
+                    "Actualizadas las instancias de «{name}»; {skipped} omitida(s) por estructura distinta"
+                )
+            };
+            if skipped == 0 {
+                self.set_status(message);
+            } else {
+                self.set_status_level(crate::status::Level::Warn, message);
+            }
+        }
+    }
+
+    /// Sustituye una plantilla por la selección actual, con descendientes (E43).
+    pub(crate) fn update_prefab(&mut self, name: &str) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let selected = self.document.selection().to_vec();
+        if selected.is_empty() {
+            self.set_status("Selecciona la instancia con los cambios");
+            return;
+        }
+        let entities = crate::prefabs::template_from_scene(self.document.scene(), &selected);
+        let count = entities.len();
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::UpdatePrefab {
+            name: name.to_owned(),
+            entities,
+        });
+        if self.document.undo_len() > history {
+            self.set_status(format!(
+                "Actualizada plantilla «{name}» con {count} entidad(es)"
+            ));
+        }
+    }
+
     /// Borra una plantilla y deja las instancias como entidades normales (E15).
     pub(crate) fn delete_prefab(&mut self, name: &str) {
         if !self.ensure_editable() {
@@ -2089,6 +2146,60 @@ mod tests {
     }
 
     #[test]
+    fn updating_then_applying_a_prefab_keeps_each_instance_in_place() {
+        let mut app = app_with_prefab();
+        app.prefab_instance_count = 2;
+        app.instantiate_prefab("base");
+        let rotated = Transform {
+            rotation: [0.0, 0.707, 0.0, 0.707],
+            ..Transform::default()
+        };
+        app.document
+            .apply(EditorCommand::SetTransform {
+                id: 2,
+                transform: rotated,
+            })
+            .expect("rotate instance");
+        app.document.select(&[2]);
+
+        app.update_prefab("base");
+
+        assert_eq!(
+            app.document.scene().prefabs[0].entities[0].transform,
+            rotated
+        );
+        assert!(app.status.contains("Actualizada plantilla"));
+
+        let before_apply = app.document.scene().clone();
+        let history = app.document.undo_len();
+        app.apply_prefab("base");
+
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert!(app.status.contains("Actualizadas"));
+        for id in [2, 3] {
+            let entity = app
+                .document
+                .scene()
+                .entities
+                .iter()
+                .find(|entity| entity.id == id)
+                .expect("instance");
+            assert_eq!(entity.transform.rotation, rotated.rotation);
+        }
+        let translations: Vec<[f32; 3]> = app
+            .document
+            .scene()
+            .entities
+            .iter()
+            .filter(|entity| entity.id != 1)
+            .map(|entity| entity.transform.translation)
+            .collect();
+        assert_eq!(translations, vec![[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
+        assert!(app.document.undo());
+        assert_eq!(app.document.scene(), &before_apply);
+    }
+
+    #[test]
     fn an_unknown_prefab_cannot_be_instantiated() {
         let mut app = app_with_prefab();
         let history = app.document.undo_len();
@@ -2136,6 +2247,8 @@ mod tests {
 
         app.save_prefab("bloqueada");
         app.instantiate_prefab("base");
+        app.apply_prefab("base");
+        app.update_prefab("base");
         app.delete_prefab("base");
 
         assert_eq!(app.document.undo_len(), history);
