@@ -84,6 +84,37 @@ pub(crate) fn hierarchy_ui(app: &mut EditorApp, ui: &mut Ui) {
             }
         });
         let has_selection = !app.document.selection().is_empty();
+        let can_paste = app.has_clipboard();
+        ui.menu_button("Editar", |ui| {
+            if ui
+                .add_enabled(has_selection, Button::new("Duplicar (Ctrl+D)"))
+                .clicked()
+            {
+                app.duplicate_selected();
+                ui.close();
+            }
+            if ui
+                .add_enabled(has_selection, Button::new("Copiar (Ctrl+C)"))
+                .clicked()
+            {
+                app.copy_selected();
+                ui.close();
+            }
+            if ui
+                .add_enabled(has_selection, Button::new("Cortar (Ctrl+X)"))
+                .clicked()
+            {
+                app.cut_selected();
+                ui.close();
+            }
+            if ui
+                .add_enabled(can_paste, Button::new("Pegar (Ctrl+V)"))
+                .clicked()
+            {
+                app.paste_clipboard();
+                ui.close();
+            }
+        });
         if ui
             .add_enabled(has_selection, Button::new("Borrar"))
             .clicked()
@@ -197,4 +228,39 @@ fn handle_root_drop(app: &mut EditorApp, ui: &Ui, rect: egui::Rect) {
         id: source,
         parent: None,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Pos2, Rect};
+    use lunar_editor::EditorDocument;
+
+    #[test]
+    fn the_hierarchy_exposes_the_edit_menu() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = EditorDocument::new();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Jerarquía").show(ctx, |ui| hierarchy_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Jerarquía").show(ctx, |ui| hierarchy_ui(&mut app, ui));
+        });
+        output.textures_delta.clear();
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.iter().any(|text| text == "Editar"), "{texts:?}");
+    }
 }

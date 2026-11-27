@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use egui::{Context, Ui};
 use lunar_editor::{EditorCommand, EditorDocument, EditorError};
-use lunar_scenes::{Component, Scene, SceneError, Transform, normalize_asset_path};
+use lunar_scenes::{Component, Scene, SceneEntity, SceneError, Transform, normalize_asset_path};
 
 use crate::assets::{AssetKind, AssetLibrary, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
@@ -59,6 +59,9 @@ pub(crate) struct EditorApp {
     pub(crate) component_edit: Option<ComponentEdit>,
     /// Última entidad usada como ancla para la selección por rango (E12).
     selection_anchor: Option<u64>,
+    /// Portapapeles en memoria (E13): no se guarda en la escena y sobrevive a
+    /// abrir otra o crear una nueva.
+    clipboard: Vec<SceneEntity>,
     synced_selection: Vec<u64>,
     synced_revision: u64,
     revision: u64,
@@ -135,6 +138,7 @@ impl EditorApp {
             scale: [1.0; 3],
             component_edit: None,
             selection_anchor: None,
+            clipboard: Vec::new(),
             synced_selection: Vec::new(),
             synced_revision: 0,
             revision: 0,
@@ -431,16 +435,81 @@ impl EditorApp {
         }
     }
 
+    /// Duplica toda la selección en un único comando atómico (E13).
     pub(crate) fn duplicate_selected(&mut self) {
         if !self.ensure_editable() {
             return;
         }
-        let Some(id) = self.document.selection().first().copied() else {
+        let ids = self.document.selection().to_vec();
+        if ids.is_empty() {
             self.set_status("Selecciona una entidad para duplicar");
             return;
-        };
-        let new_id = next_entity_id(self.document.scene());
-        self.apply(EditorCommand::DuplicateEntity { id, new_id });
+        }
+        let copies = crate::helpers::duplicate_pairs(self.document.scene(), &ids);
+        let count = copies.len();
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::DuplicateEntities {
+            copies,
+            suffix: " copia".to_owned(),
+        });
+        if self.document.undo_len() > history {
+            self.set_status(format!("Duplicadas {count} entidad(es)"));
+        }
+    }
+
+    /// Copia la selección al portapapeles sin tocar el documento ni el historial.
+    pub(crate) fn copy_selected(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let ids = self.document.selection().to_vec();
+        if ids.is_empty() {
+            self.set_status("Selecciona una entidad para copiar");
+            return;
+        }
+        self.clipboard = crate::helpers::selection_entities(self.document.scene(), &ids);
+        self.set_status(format!("Copiadas {} entidad(es)", self.clipboard.len()));
+    }
+
+    /// Copia y borra en un solo paso de undo (E13).
+    pub(crate) fn cut_selected(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
+        let ids = self.document.selection().to_vec();
+        if ids.is_empty() {
+            self.set_status("Selecciona una entidad para cortar");
+            return;
+        }
+        self.clipboard = crate::helpers::selection_entities(self.document.scene(), &ids);
+        let count = self.clipboard.len();
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::DeleteEntities { ids });
+        if self.document.undo_len() > history {
+            self.set_status(format!("Cortadas {count} entidad(es)"));
+        }
+    }
+
+    /// Pega el portapapeles con ids nuevos en un solo paso de undo (E13).
+    pub(crate) fn paste_clipboard(&mut self) {
+        if !self.ensure_editable() {
+            return;
+        }
+        if self.clipboard.is_empty() {
+            self.set_status("Portapapeles vacío");
+            return;
+        }
+        let entities = crate::helpers::remap_for_paste(&self.clipboard, self.document.scene());
+        let count = entities.len();
+        let history = self.document.undo_len();
+        self.apply(EditorCommand::PasteEntities { entities });
+        if self.document.undo_len() > history {
+            self.set_status(format!("Pegadas {count} entidad(es)"));
+        }
+    }
+
+    pub(crate) fn has_clipboard(&self) -> bool {
+        !self.clipboard.is_empty()
     }
 
     pub(crate) fn reload_assets(&mut self, ctx: &Context) {
@@ -657,6 +726,9 @@ impl EditorApp {
             redo: input.key_pressed(egui::Key::Y),
             delete: input.key_pressed(egui::Key::Delete),
             duplicate: input.key_pressed(egui::Key::D),
+            copy: input.key_pressed(egui::Key::C),
+            cut: input.key_pressed(egui::Key::X),
+            paste: input.key_pressed(egui::Key::V),
             move_tool: input.key_pressed(egui::Key::W),
             rotate_tool: input.key_pressed(egui::Key::E),
             scale_tool: input.key_pressed(egui::Key::R),
@@ -698,6 +770,15 @@ impl EditorApp {
         }
         if actions.duplicate {
             self.duplicate_selected();
+        }
+        if actions.copy {
+            self.copy_selected();
+        }
+        if actions.cut {
+            self.cut_selected();
+        }
+        if actions.paste {
+            self.paste_clipboard();
         }
         if actions.move_tool {
             self.transform_mode = TransformMode::Move;
@@ -1043,9 +1124,13 @@ mod tests {
         app.request_open();
         app.begin_save_as();
         app.duplicate_selected();
+        app.copy_selected();
+        app.cut_selected();
+        app.paste_clipboard();
         app.delete_selected();
         assert!(app.pending_action.is_none());
         assert!(!app.save_as_open);
+        assert!(!app.has_clipboard());
         assert!(app.document.scene().entities.is_empty());
         assert!(app.status.contains("Detén"));
         app.stop_play();
@@ -1187,5 +1272,182 @@ mod tests {
         });
         output.textures_delta.clear();
         assert_eq!(app.document.selection(), &[1, 3]);
+    }
+
+    #[test]
+    fn duplicating_a_multi_selection_is_one_undo_step() {
+        let mut app = app_with_entities(3);
+        app.select_clicked(1, false, false);
+        app.select_clicked(3, true, false);
+        let history = app.document.undo_len();
+
+        app.duplicate_selected();
+
+        assert_eq!(app.document.undo_len(), history + 1);
+        let entities = &app.document.scene().entities;
+        assert_eq!(entities.len(), 5);
+        assert_eq!(entities[3].id, 4);
+        assert_eq!(entities[3].name.as_deref(), Some("E1 copia"));
+        assert_eq!(entities[4].id, 5);
+        assert_eq!(entities[4].name.as_deref(), Some("E3 copia"));
+        assert_eq!(app.document.selection(), &[4, 5]);
+        app.document.undo();
+        assert_eq!(app.document.scene().entities.len(), 3);
+    }
+
+    #[test]
+    fn copying_a_group_keeps_internal_parents_and_drops_external_ones() {
+        let mut app = app_with_entities(3);
+        for (child, parent) in [(2, 1), (3, 2)] {
+            app.document
+                .apply(EditorCommand::SetParent {
+                    id: child,
+                    parent: Some(parent),
+                })
+                .expect("parent");
+        }
+        app.select_clicked(2, false, false);
+        app.select_clicked(3, true, false);
+        let history = app.document.undo_len();
+        let dirty = app.document.is_dirty();
+
+        app.copy_selected();
+
+        assert_eq!(app.clipboard.len(), 2);
+        assert_eq!(app.clipboard[0].id, 2);
+        assert_eq!(app.clipboard[0].parent, None);
+        assert_eq!(app.clipboard[1].id, 3);
+        assert_eq!(app.clipboard[1].parent, Some(2));
+        assert_eq!(app.document.undo_len(), history);
+        assert_eq!(app.document.is_dirty(), dirty);
+        assert!(app.has_clipboard());
+    }
+
+    #[test]
+    fn cutting_removes_a_group_in_one_step_and_keeps_the_clipboard() {
+        let mut app = app_with_entities(3);
+        app.select_clicked(1, false, false);
+        app.select_clicked(3, true, false);
+        let history = app.document.undo_len();
+
+        app.cut_selected();
+
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert_eq!(app.document.scene().entities.len(), 1);
+        assert_eq!(app.document.scene().entities[0].id, 2);
+        assert_eq!(app.clipboard.len(), 2);
+        assert!(app.document.selection().is_empty());
+        assert!(app.status.contains("Cortadas"));
+        app.document.undo();
+        assert_eq!(app.document.scene().entities.len(), 3);
+        assert_eq!(app.clipboard.len(), 2);
+    }
+
+    #[test]
+    fn pasting_uses_fresh_ids_and_one_undo_step() {
+        let mut app = app_with_entities(2);
+        app.select_clicked(1, false, false);
+        app.select_clicked(2, true, false);
+        app.copy_selected();
+        let history = app.document.undo_len();
+
+        app.paste_clipboard();
+
+        let ids: Vec<u64> = app
+            .document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![1, 2, 3, 4]);
+        assert_eq!(app.document.selection(), &[3, 4]);
+        assert_eq!(app.document.undo_len(), history + 1);
+        assert!(app.status.contains("Pegadas"));
+
+        app.document.undo();
+        assert_eq!(app.document.scene().entities.len(), 2);
+        app.document.redo();
+        assert_eq!(app.document.scene().entities.len(), 4);
+    }
+
+    #[test]
+    fn pasting_twice_never_reuses_ids() {
+        let mut app = app_with_entities(1);
+        app.select_clicked(1, false, false);
+        app.copy_selected();
+        app.paste_clipboard();
+        app.paste_clipboard();
+        let ids: Vec<u64> = app
+            .document
+            .scene()
+            .entities
+            .iter()
+            .map(|entity| entity.id)
+            .collect();
+        assert_eq!(ids, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn the_clipboard_survives_a_new_scene() {
+        let mut app = app_with_entities(2);
+        app.select_clicked(1, false, false);
+        app.select_clicked(2, true, false);
+        app.copy_selected();
+        app.new_document();
+        assert!(app.document.scene().entities.is_empty());
+        assert!(app.has_clipboard());
+        app.paste_clipboard();
+        assert_eq!(app.document.scene().entities.len(), 2);
+    }
+
+    #[test]
+    fn copy_cut_and_paste_are_locked_during_play() {
+        let mut app = app_with_entities(2);
+        app.select_clicked(1, false, false);
+        app.select_clicked(2, true, false);
+        app.copy_selected();
+        let clipboard = app.clipboard.clone();
+        app.play();
+        app.copy_selected();
+        app.cut_selected();
+        app.paste_clipboard();
+        assert_eq!(app.clipboard, clipboard);
+        assert_eq!(app.document.scene().entities.len(), 2);
+        assert!(app.status.contains("Detén"));
+        app.stop_play();
+    }
+
+    #[test]
+    fn ctrl_c_x_v_drive_the_clipboard_actions() {
+        let ctx = Context::default();
+        let mut app = app_with_entities(2);
+        app.select_clicked(1, false, false);
+        app.select_clicked(2, true, false);
+        let history = app.document.undo_len();
+        for (key, expected_history) in [
+            (egui::Key::C, history),
+            (egui::Key::X, history + 1),
+            (egui::Key::V, history + 2),
+        ] {
+            let input = egui::RawInput {
+                events: vec![
+                    egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                    egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::CTRL,
+                    },
+                ],
+                ..Default::default()
+            };
+            let mut output = ctx.run_pass(input, |ctx| app.handle_shortcuts(ctx));
+            output.textures_delta.clear();
+            assert_eq!(app.document.undo_len(), expected_history, "tecla {key:?}");
+        }
+        assert_eq!(app.document.scene().entities.len(), 2);
+        assert_eq!(app.clipboard.len(), 2);
     }
 }

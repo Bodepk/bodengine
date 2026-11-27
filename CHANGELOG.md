@@ -26,6 +26,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - ADR-032 V2: selección por cajas proyectadas en 3D y gizmo de traslación X/Y/Z que envía un único `SetTransform` al soltar, respetando el bloqueo de Play, el snap de 0.25 y el undo/redo.
 - Cierre de ADR-032: las plantillas de cámara y luz se dibujan como cruz de ejes en 3D, las etiquetas incluyen el id y `E`/`R` en modo 3D avisan en la consola de que rotar y escalar se hacen desde el inspector.
 - E12 del editor: multi-selección compartida entre jerarquía y viewport (clic reemplaza, Ctrl alterna, Shift amplía el rango en orden jerárquico), caja de selección 2D con un único tirador de movimiento de grupo y comandos atómicos `SetTransforms` y `DeleteEntities`, de modo que arrastrar o borrar N entidades deja una sola entrada de undo.
+- E13 del editor: menú «Editar» con duplicar/copiar/cortar/pegar y atajos `Ctrl+D`/`Ctrl+C`/`Ctrl+X`/`Ctrl+V`; duplicar y pegar N entidades son comandos atómicos (`DuplicateEntities`/`PasteEntities`) con ids nuevos y jerarquía interna remapeada, y el portapapeles sobrevive a abrir otra escena.
 
 ### Cambiado
 
@@ -34,6 +35,7 @@ Todas las decisiones de compatibilidad están en [`docs/adr`](docs/adr/ADR-000-i
 - La confirmación de cambios sin guardar se muestra en la consola en vez de añadir una segunda fila a la barra de herramientas, y «Historial» se abre desde la consola.
 - El lienzo muestra solo el tirador de la herramienta activa en lugar de los de escala y rotación a la vez; la barra del lienzo indica «Mover (W)», «Rotar (E)» o «Escalar (R)».
 - `Shift+clic` ya no alterna como Ctrl: amplía el rango desde la última entidad anclada. Con varias entidades seleccionadas, el inspector indica qué id está editando.
+- Duplicar añade el sufijo « copia» al nombre. Al copiar o cortar, los padres fuera de la selección pasan a ser raíces para que pegar en otra escena no produzca referencias inválidas.
 
 ### Corregido
 

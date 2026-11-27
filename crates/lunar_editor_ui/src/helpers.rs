@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use egui::Ui;
-use lunar_scenes::{BodyType, Component, Scene, Shape2D};
+use lunar_scenes::{BodyType, Component, Scene, SceneEntity, Shape2D};
 
 /// Siguiente id libre: el mayor existente más uno, empezando por 1.
 #[must_use]
@@ -95,6 +97,63 @@ pub(crate) fn union_selection(current: &[u64], extra: &[u64]) -> Vec<u64> {
         }
     }
     next
+}
+
+/// Copia de las entidades seleccionadas en orden de jerarquía. La jerarquía
+/// interna del grupo se conserva; los padres fuera de la selección se dejan
+/// como raíces para que el pegado sea seguro también en otra escena (E13).
+#[must_use]
+pub(crate) fn selection_entities(scene: &Scene, ids: &[u64]) -> Vec<SceneEntity> {
+    hierarchy_ids(scene)
+        .into_iter()
+        .filter(|id| ids.contains(id))
+        .filter_map(|id| {
+            scene
+                .entities
+                .iter()
+                .find(|entity| entity.id == id)
+                .cloned()
+        })
+        .map(|mut entity| {
+            entity.parent = entity.parent.filter(|parent| ids.contains(parent));
+            entity
+        })
+        .collect()
+}
+
+/// Pares `(id original, id nuevo)` consecutivos y libres, en orden de jerarquía.
+#[must_use]
+pub(crate) fn duplicate_pairs(scene: &Scene, ids: &[u64]) -> Vec<(u64, u64)> {
+    let mut next = next_entity_id(scene);
+    hierarchy_ids(scene)
+        .into_iter()
+        .filter(|id| ids.contains(id))
+        .map(|id| {
+            let pair = (id, next);
+            next = next.saturating_add(1);
+            pair
+        })
+        .collect()
+}
+
+/// Ids libres para el portapapeles y remapeo de los padres que están en él.
+#[must_use]
+pub(crate) fn remap_for_paste(clipboard: &[SceneEntity], scene: &Scene) -> Vec<SceneEntity> {
+    let mut next = next_entity_id(scene);
+    let mut remap = HashMap::with_capacity(clipboard.len());
+    for entity in clipboard {
+        remap.insert(entity.id, next);
+        next = next.saturating_add(1);
+    }
+    clipboard
+        .iter()
+        .cloned()
+        .map(|mut entity| {
+            entity.id = remap[&entity.id];
+            entity.parent = entity.parent.and_then(|parent| remap.get(&parent).copied());
+            entity
+        })
+        .collect()
 }
 
 pub(crate) fn image_component(asset: &str) -> Component {
@@ -379,5 +438,54 @@ mod tests {
         scene.entities[1].parent = Some(4);
         scene.entities[3].parent = Some(2);
         assert_eq!(hierarchy_ids(&scene), vec![4, 3, 2, 1]);
+    }
+
+    fn clipboard_scene() -> Scene {
+        let mut scene = Scene::new();
+        for id in 1..=3 {
+            let mut entity = SceneEntity::new(id);
+            entity.name = Some(format!("E{id}"));
+            scene.entities.push(entity);
+        }
+        scene.entities[1].parent = Some(1);
+        scene.entities[2].parent = Some(2);
+        scene
+    }
+
+    #[test]
+    fn copying_a_group_keeps_internal_parents_and_clears_external_ones() {
+        let scene = clipboard_scene();
+        let copied = selection_entities(&scene, &[1, 2]);
+        assert_eq!(
+            copied.iter().map(|entity| entity.id).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert_eq!(copied[0].parent, None);
+        assert_eq!(copied[1].parent, Some(1));
+        assert_eq!(copied[0].name.as_deref(), Some("E1"));
+    }
+
+    #[test]
+    fn duplicate_pairs_are_fresh_consecutive_and_hierarchy_ordered() {
+        let mut scene = Scene::new();
+        for id in [3, 2, 1] {
+            scene.entities.push(SceneEntity::new(id));
+        }
+        scene.entities[1].parent = Some(1);
+        assert_eq!(duplicate_pairs(&scene, &[1, 2]), vec![(1, 4), (2, 5)]);
+    }
+
+    #[test]
+    fn pasted_entities_get_fresh_ids_and_remapped_parents() {
+        let scene = clipboard_scene();
+        let clipboard = selection_entities(&scene, &[1, 2]);
+        let pasted = remap_for_paste(&clipboard, &scene);
+        assert_eq!(
+            pasted.iter().map(|entity| entity.id).collect::<Vec<_>>(),
+            vec![4, 5]
+        );
+        assert_eq!(pasted[0].parent, None);
+        assert_eq!(pasted[1].parent, Some(4));
+        assert_eq!(pasted[0].name.as_deref(), Some("E1"));
     }
 }

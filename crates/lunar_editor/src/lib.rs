@@ -71,6 +71,15 @@ pub enum EditorCommand {
     MoveEntity { id: u64, to: usize },
     /// Clona una entidad con un identificador nuevo (ADR-020).
     DuplicateEntity { id: u64, new_id: u64 },
+    /// Clona varias entidades con ids nuevos y jerarquía remapeada (E13).
+    DuplicateEntities {
+        /// Pares `(id original, id nuevo)` en el orden en que se insertan.
+        copies: Vec<(u64, u64)>,
+        /// Sufijo determinista que se añade al nombre de cada copia.
+        suffix: String,
+    },
+    /// Inserta entidades del portapapeles con ids ya remapeados (E13).
+    PasteEntities { entities: Vec<SceneEntity> },
     /// Aplica varias transformaciones como una sola operación (E12).
     ///
     /// Es la forma en que un arrastre con multi-selección produce un único
@@ -334,6 +343,59 @@ fn mutate(
             entity.id = *new_id;
             scene.entities.push(entity);
             *selection = vec![*new_id];
+        }
+        EditorCommand::DuplicateEntities { copies, suffix } => {
+            // Validar el lote completo antes de insertar nada: un original
+            // desconocido o un id nuevo repetido no deja copias a medias.
+            let mut originals = Vec::with_capacity(copies.len());
+            let mut fresh = Vec::with_capacity(copies.len());
+            for (original, new_id) in copies {
+                position_of(scene, *original)?;
+                if scene.entities.iter().any(|entity| entity.id == *new_id)
+                    || fresh.contains(new_id)
+                {
+                    return Err(SceneError::DuplicateEntity(*new_id).into());
+                }
+                if originals.contains(original) {
+                    return Err(SceneError::DuplicateEntity(*original).into());
+                }
+                originals.push(*original);
+                fresh.push(*new_id);
+            }
+            let remap: HashMap<u64, u64> = copies.iter().copied().collect();
+            for (original, new_id) in copies {
+                let mut entity = entity_mut(scene, *original)?.clone();
+                entity.id = *new_id;
+                if let Some(name) = entity.name.as_mut() {
+                    name.push_str(suffix);
+                }
+                // Un hijo cuyo padre también se copia pasa a colgar de la
+                // copia del padre; el resto conserva su padre original.
+                entity.parent = entity
+                    .parent
+                    .map(|parent| remap.get(&parent).copied().unwrap_or(parent));
+                scene.entities.push(entity);
+            }
+            *selection = fresh;
+        }
+        EditorCommand::PasteEntities { entities } => {
+            // Los ids ya vienen remapeados por la capa de UI. Se comprueba el
+            // lote entero antes de insertar para que un choque de ids no deje
+            // una mitad del portapapeles dentro de la escena.
+            let mut ids = Vec::with_capacity(entities.len());
+            for entity in entities {
+                if scene
+                    .entities
+                    .iter()
+                    .any(|existing| existing.id == entity.id)
+                    || ids.contains(&entity.id)
+                {
+                    return Err(SceneError::DuplicateEntity(entity.id).into());
+                }
+                ids.push(entity.id);
+            }
+            scene.entities.extend(entities.iter().cloned());
+            *selection = ids;
         }
         EditorCommand::SetTransforms { transforms } => {
             // `scene` ya es una copia: validamos todos los ids antes de escribir
@@ -910,6 +972,160 @@ mod tests {
         let result = document.apply(EditorCommand::DeleteEntities { ids: vec![1, 404] });
 
         assert!(result.is_err());
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), history);
+        assert!(!document.redo());
+    }
+
+    fn chain_with_names() -> EditorDocument {
+        let mut document = EditorDocument::new();
+        for id in 1..=3 {
+            document
+                .apply(EditorCommand::CreateEntity {
+                    id,
+                    name: Some(format!("E{id}")),
+                })
+                .expect("create");
+        }
+        document
+            .apply(EditorCommand::SetParent {
+                id: 2,
+                parent: Some(1),
+            })
+            .expect("parent 2");
+        document
+            .apply(EditorCommand::SetParent {
+                id: 3,
+                parent: Some(2),
+            })
+            .expect("parent 3");
+        document
+            .apply(EditorCommand::AddComponent {
+                id: 2,
+                component: Component::Image {
+                    asset: "sprites/hero.png".to_owned(),
+                },
+            })
+            .expect("add image");
+        document
+    }
+
+    #[test]
+    fn duplicating_a_batch_preserves_hierarchy_and_is_one_undo_step() {
+        let mut document = chain_with_names();
+        let history = document.undo_len();
+
+        document
+            .apply(EditorCommand::DuplicateEntities {
+                copies: vec![(1, 10), (2, 11)],
+                suffix: " copia".to_owned(),
+            })
+            .expect("duplicate batch");
+
+        assert_eq!(document.undo_len(), history + 1);
+        assert_eq!(document.selection(), &[10, 11]);
+        let entity = |id: u64| {
+            document
+                .scene()
+                .entities
+                .iter()
+                .find(|candidate| candidate.id == id)
+                .cloned()
+                .expect("entity")
+        };
+        assert_eq!(entity(10).name.as_deref(), Some("E1 copia"));
+        assert_eq!(entity(10).parent, None);
+        assert_eq!(entity(11).name.as_deref(), Some("E2 copia"));
+        assert_eq!(entity(11).parent, Some(10));
+        assert_eq!(entity(11).components, entity(2).components);
+        assert_eq!(entity(3).parent, Some(2));
+
+        assert!(document.undo());
+        assert_eq!(document.scene().entities.len(), 3);
+        assert_eq!(document.selection(), &[3]);
+        assert!(document.redo());
+        assert_eq!(document.scene().entities.len(), 5);
+    }
+
+    #[test]
+    fn an_invalid_duplicate_batch_leaves_the_scene_untouched() {
+        let mut document = chain_with_names();
+        let before = document.scene().clone();
+        let history = document.undo_len();
+
+        assert!(
+            document
+                .apply(EditorCommand::DuplicateEntities {
+                    copies: vec![(1, 10), (404, 11)],
+                    suffix: String::new(),
+                })
+                .is_err()
+        );
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), history);
+        assert!(!document.redo());
+
+        assert_eq!(
+            document.apply(EditorCommand::DuplicateEntities {
+                copies: vec![(1, 2)],
+                suffix: String::new(),
+            }),
+            Err(SceneError::DuplicateEntity(2).into())
+        );
+        assert_eq!(document.scene(), &before);
+    }
+
+    #[test]
+    fn pasting_a_batch_uses_fresh_ids_and_is_one_undo_step() {
+        let mut document = chain_with_names();
+        let history = document.undo_len();
+        let mut first = SceneEntity::new(10);
+        first.name = Some("E1".to_owned());
+        let mut second = SceneEntity::new(11);
+        second.parent = Some(10);
+
+        document
+            .apply(EditorCommand::PasteEntities {
+                entities: vec![first, second],
+            })
+            .expect("paste batch");
+
+        assert_eq!(document.undo_len(), history + 1);
+        assert_eq!(document.selection(), &[10, 11]);
+        assert_eq!(document.scene().entities.len(), 5);
+        assert_eq!(document.scene().entities[4].parent, Some(10));
+
+        assert!(document.undo());
+        assert_eq!(document.scene().entities.len(), 3);
+        assert!(document.redo());
+        assert_eq!(document.scene().entities.len(), 5);
+    }
+
+    #[test]
+    fn an_invalid_paste_leaves_the_scene_untouched() {
+        let mut document = chain_with_names();
+        let before = document.scene().clone();
+        let history = document.undo_len();
+        let mut child = SceneEntity::new(11);
+        child.parent = Some(999);
+
+        assert!(
+            document
+                .apply(EditorCommand::PasteEntities {
+                    entities: vec![SceneEntity::new(2), child.clone()],
+                })
+                .is_err()
+        );
+        assert_eq!(
+            document.apply(EditorCommand::PasteEntities {
+                entities: vec![SceneEntity::new(10), child],
+            }),
+            Err(SceneError::UnknownParent {
+                child: 11,
+                parent: 999,
+            }
+            .into())
+        );
         assert_eq!(document.scene(), &before);
         assert_eq!(document.undo_len(), history);
         assert!(!document.redo());
