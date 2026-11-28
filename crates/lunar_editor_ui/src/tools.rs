@@ -6,6 +6,8 @@
 //! existen y las cámaras/luces son marcadores de transformación hasta que
 //! exista una simulación de Play (decisión B de esta fase).
 
+use lunar_scenes::Transform;
+
 use crate::assets::AssetKind;
 
 /// Herramienta activa sobre el lienzo, con los atajos de Unity/Unreal.
@@ -69,11 +71,17 @@ pub(crate) enum EntityTemplate {
     Light2D,
     /// Luz del editor con sidecar propio (E49, ADR-050).
     Light3D,
+    /// Primitivas de caja para probar luces y materiales (ADR-052).
+    Cube,
+    Plane,
+    Wall,
+    Column,
+    Ramp,
 }
 
 impl EntityTemplate {
     /// Orden estable del menú.
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 13] = [
         Self::Empty,
         Self::Sprite,
         Self::Audio,
@@ -82,6 +90,20 @@ impl EntityTemplate {
         Self::Camera2D,
         Self::Light2D,
         Self::Light3D,
+        Self::Cube,
+        Self::Plane,
+        Self::Wall,
+        Self::Column,
+        Self::Ramp,
+    ];
+
+    /// Primitivas 3D que se agrupan en su propio submenú.
+    pub(crate) const PRIMITIVES: [Self; 5] = [
+        Self::Cube,
+        Self::Plane,
+        Self::Wall,
+        Self::Column,
+        Self::Ramp,
     ];
 
     #[must_use]
@@ -95,6 +117,11 @@ impl EntityTemplate {
             Self::Camera2D => "Cámara 2D (marcador)",
             Self::Light2D => "Luz 2D (marcador)",
             Self::Light3D => "Luz 3D (marcador)",
+            Self::Cube => "Cubo 1×1",
+            Self::Plane => "Plano 8×8",
+            Self::Wall => "Muro 4×3",
+            Self::Column => "Columna 0.5×3",
+            Self::Ramp => "Rampa inclinada",
         }
     }
 
@@ -110,6 +137,11 @@ impl EntityTemplate {
             Self::Camera2D => format!("Cámara 2D {id}"),
             Self::Light2D => format!("Luz 2D {id}"),
             Self::Light3D => format!("Luz 3D {id}"),
+            Self::Cube => format!("Cubo {id}"),
+            Self::Plane => format!("Plano {id}"),
+            Self::Wall => format!("Muro {id}"),
+            Self::Column => format!("Columna {id}"),
+            Self::Ramp => format!("Rampa {id}"),
         }
     }
 
@@ -120,7 +152,58 @@ impl EntityTemplate {
             Self::Sprite => Some(AssetKind::Image),
             Self::Audio => Some(AssetKind::Audio),
             Self::Mesh => Some(AssetKind::Mesh),
-            Self::Empty | Self::Collider2D | Self::Camera2D | Self::Light2D | Self::Light3D => None,
+            Self::Empty
+            | Self::Collider2D
+            | Self::Camera2D
+            | Self::Light2D
+            | Self::Light3D
+            | Self::Cube
+            | Self::Plane
+            | Self::Wall
+            | Self::Column
+            | Self::Ramp => None,
+        }
+    }
+
+    /// Transformación inicial de la plantilla. Las primitivas nacen apoyadas en
+    /// el suelo y con un tamaño legible para probar luces y materiales.
+    #[must_use]
+    pub(crate) fn transform(self) -> Option<Transform> {
+        let scale = |scale: [f32; 3]| Transform {
+            scale,
+            ..Transform::default()
+        };
+        match self {
+            Self::Cube => Some(Transform {
+                translation: [0.0, 0.5, 0.0],
+                ..Transform::default()
+            }),
+            Self::Plane => Some(Transform {
+                translation: [0.0, 0.05, 0.0],
+                ..scale([8.0, 0.1, 8.0])
+            }),
+            Self::Wall => Some(Transform {
+                translation: [0.0, 1.5, 0.0],
+                ..scale([4.0, 3.0, 0.2])
+            }),
+            Self::Column => Some(Transform {
+                translation: [0.0, 1.5, 0.0],
+                ..scale([0.5, 3.0, 0.5])
+            }),
+            Self::Ramp => Some(Transform {
+                translation: [0.0, 0.5, 0.0],
+                // Unos 20° alrededor de X: rampa transitable sin colisionador.
+                rotation: [-0.174_108, 0.0, 0.0, 0.984_731],
+                ..scale([3.0, 0.2, 2.0])
+            }),
+            Self::Empty
+            | Self::Sprite
+            | Self::Audio
+            | Self::Collider2D
+            | Self::Mesh
+            | Self::Camera2D
+            | Self::Light2D
+            | Self::Light3D => None,
         }
     }
 }
@@ -158,6 +241,25 @@ mod tests {
             EntityTemplate::Light2D,
         ] {
             assert_eq!(template.asset_kind(), None);
+        }
+    }
+
+    #[test]
+    fn primitives_carry_a_usable_initial_transform() {
+        assert!(EntityTemplate::Cube.transform().is_some());
+        assert!(EntityTemplate::Plane.transform().is_some());
+        assert!(EntityTemplate::Wall.transform().is_some());
+        assert!(EntityTemplate::Column.transform().is_some());
+        assert!(EntityTemplate::Ramp.transform().is_some());
+        assert!(EntityTemplate::Empty.transform().is_none());
+        let plane = EntityTemplate::Plane.transform().expect("plano");
+        assert!(plane.scale[0] > plane.scale[1]);
+        assert!(plane.scale[2] > plane.scale[1]);
+        let ramp = EntityTemplate::Ramp.transform().expect("rampa");
+        assert!(ramp.rotation[0].abs() > 0.0);
+        for template in EntityTemplate::PRIMITIVES {
+            assert!(!template.name(1).starts_with("Cámara"));
+            assert!(!template.name(1).starts_with("Luz"));
         }
     }
 

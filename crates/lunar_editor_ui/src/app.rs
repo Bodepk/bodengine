@@ -148,6 +148,8 @@ pub(crate) struct EditorApp {
     pub(crate) view_center: [f32; 2],
     pub(crate) zoom: f32,
     pub(crate) show_grid: bool,
+    /// Rejilla del suelo de la vista 3D (ADR-052); se persiste con el resto.
+    pub(crate) show_grid3d: bool,
     pub(crate) snap: bool,
     pub(crate) transform_mode: TransformMode,
     /// Espacio del gizmo de grupo (E14), persistido con el resto de preferencias.
@@ -269,6 +271,7 @@ impl EditorApp {
             view_center: settings.center,
             zoom: settings.zoom,
             show_grid: settings.show_grid,
+            show_grid3d: settings.show_grid3d,
             snap: settings.snap,
             transform_mode: TransformMode::default(),
             transform_space: settings.transform_space,
@@ -806,6 +809,7 @@ impl EditorApp {
             center: self.view_center,
             zoom: self.zoom,
             show_grid: self.show_grid,
+            show_grid3d: self.show_grid3d,
             snap: self.snap,
             transform_space: self.transform_space,
             shading_mode: self.shading_mode,
@@ -1616,6 +1620,9 @@ impl EditorApp {
             id,
             name: Some(template.name(id)),
         });
+        if let Some(transform) = template.transform() {
+            self.apply(EditorCommand::SetTransform { id, transform });
+        }
         if let Some(component) = component {
             self.apply(EditorCommand::AddComponent { id, component });
         }
@@ -2056,6 +2063,28 @@ mod tests {
             Some("Luz 3D 1")
         );
         assert!(app.light_map.get(1).is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn primitive_templates_create_positioned_boxes() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_primitive_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&root);
+        app.path = root.join("scene.json");
+        app.document = EditorDocument::new();
+
+        app.create_from_template(EntityTemplate::Cube);
+        app.create_from_template(EntityTemplate::Plane);
+
+        let entities = &app.document.scene().entities;
+        assert_eq!(entities.len(), 2);
+        assert_eq!(entities[0].name.as_deref(), Some("Cubo 1"));
+        assert_eq!(entities[0].transform.translation, [0.0, 0.5, 0.0]);
+        assert!(!crate::view3d::is_marker(&entities[0]));
+        assert_eq!(entities[1].name.as_deref(), Some("Plano 2"));
+        assert_eq!(entities[1].transform.scale, [8.0, 0.1, 8.0]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

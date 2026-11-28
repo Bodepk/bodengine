@@ -673,6 +673,30 @@ fn paint_grid(ui: &mut Ui, rect: Rect, camera: Camera3D) {
             painter.line_segment([a, b], stroke);
         }
     }
+    // Borde del cuadrado: deja claro que la rejilla es finita (ADR-052).
+    let border = Stroke::new(1.0, Color32::from_gray(100));
+    for (start, end) in [
+        (
+            [-GRID_EXTENT, 0.0, -GRID_EXTENT],
+            [GRID_EXTENT, 0.0, -GRID_EXTENT],
+        ),
+        (
+            [GRID_EXTENT, 0.0, -GRID_EXTENT],
+            [GRID_EXTENT, 0.0, GRID_EXTENT],
+        ),
+        (
+            [GRID_EXTENT, 0.0, GRID_EXTENT],
+            [-GRID_EXTENT, 0.0, GRID_EXTENT],
+        ),
+        (
+            [-GRID_EXTENT, 0.0, GRID_EXTENT],
+            [-GRID_EXTENT, 0.0, -GRID_EXTENT],
+        ),
+    ] {
+        if let (Some(a), Some(b)) = (project(start, camera, rect), project(end, camera, rect)) {
+            painter.line_segment([a, b], border);
+        }
+    }
 }
 
 fn paint_axes(ui: &mut Ui, rect: Rect, camera: Camera3D) {
@@ -951,6 +975,13 @@ fn handle_camera(app: &mut EditorApp, ui: &mut Ui, rect: Rect, response: &egui::
 pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.label("Vista 3D");
+        if ui
+            .checkbox(&mut app.show_grid3d, "Rejilla")
+            .on_hover_text("Mostrar u ocultar la rejilla finita del suelo")
+            .changed()
+        {
+            app.save_settings();
+        }
         egui::ComboBox::from_label("Sombreado")
             .selected_text(app.shading_mode.label())
             .show_ui(ui, |ui| {
@@ -1012,7 +1043,9 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
 
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
     paint_sky(app, ui, rect);
-    paint_grid(ui, rect, app.camera3d);
+    if app.show_grid3d {
+        paint_grid(ui, rect, app.camera3d);
+    }
     paint_axes(ui, rect, app.camera3d);
     paint_entities(app, ui, rect, app.camera3d);
     paint_gizmo(app, ui, rect, app.camera3d);

@@ -144,11 +144,22 @@ pub(crate) fn hierarchy_ui(app: &mut EditorApp, ui: &mut Ui) {
             });
             ui.separator();
             for template in EntityTemplate::ALL {
+                if EntityTemplate::PRIMITIVES.contains(&template) {
+                    continue;
+                }
                 if ui.button(template.label()).clicked() {
                     app.create_from_template(template);
                     ui.close();
                 }
             }
+            ui.menu_button("Primitivas 3D", |ui| {
+                for template in EntityTemplate::PRIMITIVES {
+                    if ui.button(template.label()).clicked() {
+                        app.create_from_template(template);
+                        ui.close();
+                    }
+                }
+            });
             let prefabs = crate::prefabs::prefab_names(app.document.scene());
             if !prefabs.is_empty() {
                 ui.separator();

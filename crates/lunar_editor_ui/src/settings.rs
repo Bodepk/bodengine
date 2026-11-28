@@ -20,6 +20,8 @@ pub(crate) struct EditorSettings {
     pub(crate) center: [f32; 2],
     pub(crate) zoom: f32,
     pub(crate) show_grid: bool,
+    /// Rejilla del suelo de la vista 3D (ADR-052).
+    pub(crate) show_grid3d: bool,
     pub(crate) snap: bool,
     /// Espacio del gizmo (E14). Se guarda como texto estable, no como `Debug`.
     pub(crate) transform_space: TransformSpace,
@@ -36,6 +38,7 @@ impl Default for EditorSettings {
             center: [0.0, 0.0],
             zoom: 48.0,
             show_grid: true,
+            show_grid3d: true,
             snap: false,
             transform_space: TransformSpace::default(),
             shading_mode: ShadingMode::default(),
@@ -62,8 +65,13 @@ pub(crate) fn encode(settings: &EditorSettings) -> String {
         AssetView::Grid => "grid",
     };
     format!(
-        "assets_root={root}\ncenter_x={}\ncenter_y={}\nzoom={}\nshow_grid={}\nsnap={}\ntransform_space={space}\nshading_mode={shading}\nasset_view={view}\n",
-        settings.center[0], settings.center[1], settings.zoom, settings.show_grid, settings.snap
+        "assets_root={root}\ncenter_x={}\ncenter_y={}\nzoom={}\nshow_grid={}\nshow_grid3d={}\nsnap={}\ntransform_space={space}\nshading_mode={shading}\nasset_view={view}\n",
+        settings.center[0],
+        settings.center[1],
+        settings.zoom,
+        settings.show_grid,
+        settings.show_grid3d,
+        settings.snap
     )
 }
 
@@ -98,6 +106,7 @@ pub(crate) fn decode(contents: &str) -> EditorSettings {
                 }
             }
             "show_grid" => settings.show_grid = boolean(value, settings.show_grid),
+            "show_grid3d" => settings.show_grid3d = boolean(value, settings.show_grid3d),
             "snap" => settings.snap = boolean(value, settings.snap),
             "transform_space" => {
                 settings.transform_space = if value.eq_ignore_ascii_case("local") {
@@ -187,6 +196,7 @@ mod tests {
             center: [3.5, -2.25],
             zoom: 96.0,
             show_grid: false,
+            show_grid3d: false,
             snap: true,
             transform_space: TransformSpace::Local,
             shading_mode: ShadingMode::Lit,
@@ -232,12 +242,13 @@ mod tests {
 
     #[test]
     fn invalid_fields_fall_back_independently() {
-        let text = "assets_root=\ncenter_x=NaN\ncenter_y=4\nzoom=inf\nshow_grid=quizá\nsnap=true\n";
+        let text = "assets_root=\ncenter_x=NaN\ncenter_y=4\nzoom=inf\nshow_grid=quizá\nshow_grid3d=quizá\nsnap=true\n";
         let settings = decode(text);
         assert_eq!(settings.assets_root, DEFAULT_ASSETS_ROOT);
         assert_eq!(settings.center, [0.0, 4.0]);
         assert_eq!(settings.zoom, 48.0);
         assert!(settings.show_grid);
+        assert!(settings.show_grid3d);
         assert!(settings.snap);
     }
 
