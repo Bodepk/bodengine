@@ -94,6 +94,32 @@ pub(crate) enum CanvasDrag {
     },
 }
 
+/// Conmutador 2D/3D compartido por las dos barras del panel central.
+pub(crate) fn view_mode_switch(app: &mut EditorApp, ui: &mut Ui) {
+    if ui
+        .selectable_label(app.view_mode == ViewMode::TwoD, ViewMode::TwoD.label())
+        .clicked()
+    {
+        set_view_mode(app, ViewMode::TwoD);
+    }
+    if ui
+        .selectable_label(app.view_mode == ViewMode::ThreeD, ViewMode::ThreeD.label())
+        .clicked()
+    {
+        set_view_mode(app, ViewMode::ThreeD);
+    }
+}
+
+fn set_view_mode(app: &mut EditorApp, mode: ViewMode) {
+    if app.view_mode == mode {
+        return;
+    }
+    commit_preview(app);
+    app.view_mode = mode;
+    app.drag = CanvasDrag::None;
+    app.view3d_drag = Drag3D::None;
+}
+
 pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
     let mut preferences_changed = false;
     ui.horizontal(|ui| {
@@ -117,24 +143,7 @@ pub(crate) fn canvas_ui(app: &mut EditorApp, ui: &mut Ui) {
             preferences_changed = true;
         }
         ui.separator();
-        if ui
-            .selectable_label(app.view_mode == ViewMode::TwoD, ViewMode::TwoD.label())
-            .clicked()
-        {
-            commit_preview(app);
-            app.view_mode = ViewMode::TwoD;
-            app.drag = CanvasDrag::None;
-            app.view3d_drag = Drag3D::None;
-        }
-        if ui
-            .selectable_label(app.view_mode == ViewMode::ThreeD, ViewMode::ThreeD.label())
-            .clicked()
-        {
-            commit_preview(app);
-            app.view_mode = ViewMode::ThreeD;
-            app.drag = CanvasDrag::None;
-            app.view3d_drag = Drag3D::None;
-        }
+        view_mode_switch(app, ui);
         ui.label(
             "W mover · E rotar · R escalar · Q espacio · F encuadrar · rueda zoom · derecho paneo",
         );

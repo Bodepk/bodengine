@@ -26,11 +26,11 @@ const NEAR: f32 = 0.1;
 const FOV: f32 = std::f32::consts::FRAC_PI_3;
 const GRID_EXTENT: f32 = 10.0;
 
-/// Modo del panel central. El editor arranca en 2D (ADR-020).
+/// Modo del panel central. El editor arranca en 3D para inspeccionar luces y materiales.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ViewMode {
-    #[default]
     TwoD,
+    #[default]
     ThreeD,
 }
 
@@ -975,6 +975,8 @@ fn handle_camera(app: &mut EditorApp, ui: &mut Ui, rect: Rect, response: &egui::
 pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.label("Vista 3D");
+        crate::canvas::view_mode_switch(app, ui);
+        ui.separator();
         if ui
             .checkbox(&mut app.show_grid3d, "Rejilla")
             .on_hover_text("Mostrar u ocultar la rejilla finita del suelo")
@@ -1272,7 +1274,7 @@ mod tests {
     fn view_modes_have_stable_labels() {
         assert_eq!(ViewMode::TwoD.label(), "2D");
         assert_eq!(ViewMode::ThreeD.label(), "3D");
-        assert_eq!(ViewMode::default(), ViewMode::TwoD);
+        assert_eq!(ViewMode::default(), ViewMode::ThreeD);
     }
 
     #[test]
