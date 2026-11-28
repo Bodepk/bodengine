@@ -9,76 +9,124 @@ use crate::tools::EntityTemplate;
 
 pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.heading("Lunar Editor");
-        ui.separator();
-        if ui.button("Nuevo").clicked() {
-            app.request_new();
-        }
-        ui.label("Ruta:");
-        ui.add(
-            egui::TextEdit::singleline(&mut app.path_text)
-                .hint_text("scene.json")
-                .desired_width(260.0),
+        ui.label(
+            egui::RichText::new("Lunar Editor")
+                .heading()
+                .strong()
+                .color(Color32::from_rgb(122, 178, 255)),
         );
-        if ui.button("Buscar…").clicked() {
-            app.begin_picker(PickerMode::Open);
-        }
-        if ui.button("Abrir").clicked() {
-            app.request_open();
-        }
-        if ui.button("Guardar").clicked() {
-            app.save();
-        }
-        if ui.button("Guardar como").clicked() {
-            app.begin_save_as();
-        }
-        let recent = app.recent.clone();
-        egui::ComboBox::from_label("Recientes")
-            .selected_text(if recent.is_empty() { "—" } else { "Abrir…" })
-            .show_ui(ui, |ui| {
+        ui.separator();
+        ui.menu_button("Archivo", |ui| {
+            if ui.button("Nuevo").clicked() {
+                app.request_new();
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("Abrir…").clicked() {
+                app.request_open();
+                ui.close();
+            }
+            let recent = app.recent.clone();
+            ui.menu_button("Abrir reciente", |ui| {
                 if recent.is_empty() {
                     ui.label("Sin escenas recientes");
                 }
                 for path in recent {
                     if ui.selectable_label(false, path.clone()).clicked() {
                         app.open_recent(path);
+                        ui.close();
                     }
                 }
             });
+            if ui.button("Elegir ruta…").clicked() {
+                app.begin_picker(PickerMode::Open);
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("Guardar").clicked() {
+                app.save();
+                ui.close();
+            }
+            if ui.button("Guardar como…").clicked() {
+                app.begin_save_as();
+                ui.close();
+            }
+            ui.separator();
+            ui.label("Ruta de escena");
+            ui.add(
+                egui::TextEdit::singleline(&mut app.path_text)
+                    .hint_text("scene.json")
+                    .desired_width(260.0),
+            );
+        });
+        let has_selection = !app.document.selection().is_empty();
+        ui.menu_button("Editar", |ui| {
+            if ui
+                .add_enabled(app.document.can_undo(), Button::new("Deshacer (Ctrl+Z)"))
+                .clicked()
+            {
+                app.undo();
+                ui.close();
+            }
+            if ui
+                .add_enabled(app.document.can_redo(), Button::new("Rehacer (Ctrl+Y)"))
+                .clicked()
+            {
+                app.redo();
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .add_enabled(has_selection, Button::new("Duplicar (Ctrl+D)"))
+                .clicked()
+            {
+                app.duplicate_selected();
+                ui.close();
+            }
+            if ui
+                .add_enabled(has_selection, Button::new("Borrar (Supr)"))
+                .clicked()
+            {
+                app.delete_selected();
+                ui.close();
+            }
+        });
+        ui.menu_button("Ver", |ui| {
+            if ui.button("Historial").clicked() {
+                app.show_history = !app.show_history;
+                ui.close();
+            }
+            if ui.button("Validación de escena").clicked() {
+                app.show_validation = !app.show_validation;
+                app.run_validation();
+                ui.close();
+            }
+            if ui.button("Entorno 3D").clicked() {
+                app.show_environment = !app.show_environment;
+                ui.close();
+            }
+            if ui.button("Timeline de animación").clicked() {
+                app.show_timeline = !app.show_timeline;
+                ui.close();
+            }
+        });
         ui.separator();
-        if ui
-            .add_enabled(app.document.can_undo(), Button::new("Deshacer"))
-            .clicked()
-        {
-            app.undo();
-        }
-        if ui
-            .add_enabled(app.document.can_redo(), Button::new("Rehacer"))
-            .clicked()
-        {
-            app.redo();
-        }
-        if ui.button("Duplicar (Ctrl+D)").clicked() {
-            app.duplicate_selected();
-        }
-        if ui.button("Historial").clicked() {
-            app.show_history = !app.show_history;
-        }
-        if ui.button("Validar").clicked() {
-            app.show_validation = !app.show_validation;
-            app.run_validation();
-        }
-        if ui.button("Entorno").clicked() {
-            app.show_environment = !app.show_environment;
-        }
-        ui.separator();
-        ui.label(format!(
-            "{} entidad(es)",
-            app.document.scene().entities.len()
-        ));
+        let scene_name = app.path.file_name().map_or_else(
+            || "Sin escena".to_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        ui.label(scene_name)
+            .on_hover_text(app.path.display().to_string());
         if app.document.is_dirty() {
-            ui.colored_label(Color32::YELLOW, "● sin guardar");
+            ui.colored_label(Color32::YELLOW, "●")
+                .on_hover_text("Cambios sin guardar");
         }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(format!(
+                "{} entidad(es)",
+                app.document.scene().entities.len()
+            ));
+        });
     });
 }
 
@@ -157,31 +205,37 @@ pub(crate) fn hierarchy_ui(app: &mut EditorApp, ui: &mut Ui) {
                 app.paste_clipboard();
                 ui.close();
             }
+            ui.separator();
+            if ui
+                .add_enabled(has_selection, Button::new("Borrar (Supr)"))
+                .clicked()
+            {
+                app.delete_selected();
+                ui.close();
+            }
         });
-        if ui
-            .add_enabled(has_selection, Button::new("Borrar"))
-            .clicked()
-        {
-            app.delete_selected();
-        }
     });
-    ui.horizontal(|ui| {
-        ui.add(
-            egui::TextEdit::singleline(&mut app.prefab_name_buffer)
-                .hint_text("Nombre del prefab")
-                .desired_width(110.0),
-        );
-        if ui
-            .add_enabled(
-                has_selection && !app.prefab_name_buffer.trim().is_empty(),
-                Button::new("Guardar prefab"),
-            )
-            .clicked()
-        {
-            let name = app.prefab_name_buffer.clone();
-            app.save_prefab(&name);
-        }
-    });
+    egui::CollapsingHeader::new("Prefabs")
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.prefab_name_buffer)
+                        .hint_text("Nombre del prefab")
+                        .desired_width(110.0),
+                );
+                if ui
+                    .add_enabled(
+                        has_selection && !app.prefab_name_buffer.trim().is_empty(),
+                        Button::new("Guardar prefab"),
+                    )
+                    .clicked()
+                {
+                    let name = app.prefab_name_buffer.clone();
+                    app.save_prefab(&name);
+                }
+            });
+        });
     ui.separator();
 
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -324,9 +378,6 @@ mod tests {
             })
             .collect();
         assert!(texts.iter().any(|text| text == "Editar"), "{texts:?}");
-        assert!(
-            texts.iter().any(|text| text == "Guardar prefab"),
-            "{texts:?}"
-        );
+        assert!(texts.iter().any(|text| text == "Prefabs"), "{texts:?}");
     }
 }

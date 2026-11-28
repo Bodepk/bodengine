@@ -24,8 +24,16 @@ fn rgb(red: u8, green: u8, blue: u8) -> [f32; 3] {
     ]
 }
 
-fn default_sky() -> [f32; 3] {
-    rgb(24, 26, 32)
+fn default_top() -> [f32; 3] {
+    rgb(16, 20, 30)
+}
+
+fn default_middle() -> [f32; 3] {
+    rgb(28, 33, 46)
+}
+
+fn default_bottom() -> [f32; 3] {
+    rgb(10, 12, 18)
 }
 
 /// Modo de fondo del viewport.
@@ -81,10 +89,10 @@ pub(crate) struct Environment {
 impl Default for Environment {
     fn default() -> Self {
         Self {
-            mode: SkyMode::Solid,
-            top: default_sky(),
-            middle: default_sky(),
-            bottom: default_sky(),
+            mode: SkyMode::Gradient,
+            top: default_top(),
+            middle: default_middle(),
+            bottom: default_bottom(),
             fog: false,
             fog_color: rgb(158, 189, 220),
             fog_start: 15.0,
@@ -316,16 +324,17 @@ pub(crate) fn environment_ui(app: &mut EditorApp, ui: &mut Ui) {
                 }
             }
         });
-    color_row(ui, "Cima", &mut next.top);
-    color_row(ui, "Medio", &mut next.middle);
-    color_row(ui, "Base", &mut next.bottom);
     ui.horizontal(|ui| {
+        ui.label("Presets");
         for preset in SkyPreset::ALL {
             if ui.button(preset.label()).clicked() {
                 preset.apply(&mut next);
             }
         }
     });
+    color_row(ui, "Cima", &mut next.top);
+    color_row(ui, "Medio", &mut next.middle);
+    color_row(ui, "Base", &mut next.bottom);
     sky_preview(ui, &next);
     ui.separator();
     ui.checkbox(&mut next.fog, "Niebla");
@@ -430,8 +439,8 @@ mod tests {
             "fog_end=NaN\n",
         );
         let env = Environment::decode(text);
-        assert_eq!(env.mode, SkyMode::Solid);
-        assert!((env.top[0] - default_sky()[0]).abs() < 0.0001);
+        assert_eq!(env.mode, SkyMode::Gradient);
+        assert!((env.top[0] - default_top()[0]).abs() < 0.0001);
         assert_eq!(env.top[1], 0.5);
         assert_eq!(env.top[2], 1.0);
         assert!(!env.fog);
@@ -443,9 +452,12 @@ mod tests {
 
     #[test]
     fn solid_sky_is_flat_and_gradient_is_deterministic() {
-        let solid = Environment::default();
+        let solid = Environment {
+            mode: SkyMode::Solid,
+            ..Default::default()
+        };
         assert_eq!(sky_color(&solid, 0.0), sky_color(&solid, 1.0));
-        assert_eq!(sky_color(&solid, 0.0), color(default_sky()));
+        assert_eq!(sky_color(&solid, 0.0), color(solid.middle));
         let mut gradient = solid;
         gradient.mode = SkyMode::Gradient;
         gradient.top = [0.0, 0.0, 0.0];
@@ -455,6 +467,14 @@ mod tests {
         assert_eq!(sky_color(&gradient, 0.5), color([0.5; 3]));
         assert_eq!(sky_color(&gradient, 1.0), Color32::WHITE);
         assert_eq!(sky_color(&gradient, f32::NAN), Color32::BLACK);
+    }
+
+    #[test]
+    fn default_environment_is_a_subtle_gradient() {
+        let env = Environment::default();
+        assert_eq!(env.mode, SkyMode::Gradient);
+        assert_ne!(sky_color(&env, 0.0), sky_color(&env, 1.0));
+        assert!(!env.fog);
     }
 
     #[test]

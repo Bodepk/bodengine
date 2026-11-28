@@ -410,25 +410,39 @@ fn asset_tile_ui(app: &mut EditorApp, ui: &mut Ui, entry: &AssetEntry) {
 }
 
 pub(crate) fn assets_ui(app: &mut EditorApp, ui: &mut Ui) {
-    ui.heading("Assets");
-    ui.add(
-        egui::TextEdit::singleline(&mut app.assets_root_text)
-            .hint_text("carpeta de assets")
-            .desired_width(210.0),
-    );
-    if ui.button("Recargar").clicked() {
-        let ctx = ui.ctx().clone();
-        app.reload_assets(&ctx);
-    }
-    ui.add(
-        egui::TextEdit::singleline(&mut app.material_name_buffer)
-            .hint_text("nombre material")
-            .desired_width(120.0),
-    );
-    if ui.button("+ Material").clicked() {
-        let ctx = ui.ctx().clone();
-        app.create_material(&ctx);
-    }
+    ui.horizontal(|ui| {
+        ui.heading("Assets");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .small_button("Recargar")
+                .on_hover_text("Volver a leer la carpeta de assets")
+                .clicked()
+            {
+                let ctx = ui.ctx().clone();
+                app.reload_assets(&ctx);
+            }
+        });
+    });
+    egui::CollapsingHeader::new("Ruta y materiales")
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut app.assets_root_text)
+                    .hint_text("carpeta de assets")
+                    .desired_width(210.0),
+            );
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut app.material_name_buffer)
+                        .hint_text("nombre material")
+                        .desired_width(120.0),
+                );
+                if ui.button("+ Material").clicked() {
+                    let ctx = ui.ctx().clone();
+                    app.create_material(&ctx);
+                }
+            });
+        });
     if let Some(error) = &app.assets.error {
         ui.colored_label(Color32::RED, error);
     }

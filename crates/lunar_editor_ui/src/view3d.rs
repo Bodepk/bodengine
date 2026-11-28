@@ -971,12 +971,18 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
             .unwrap_or("Sin material");
         ui.label(format!("Material: {assigned}"));
         ui.label(format!("Luces: {}", app.light_map.len()));
-        let environment = &app.environment;
-        ui.label(format!(
+        let environment_label = format!(
             "Entorno: {}{}",
-            environment.mode.label(),
-            if environment.fog { " + niebla" } else { "" }
-        ));
+            app.environment.mode.label(),
+            if app.environment.fog { " + niebla" } else { "" }
+        );
+        if ui
+            .button(environment_label)
+            .on_hover_text("Abrir el editor de cielo y niebla")
+            .clicked()
+        {
+            app.show_environment = true;
+        }
         ui.label(format!("Distancia {:.1}", app.camera3d.distance));
         ui.label("Derecho orbitar · central desplazar · rueda zoom");
         ui.separator();
@@ -1442,7 +1448,7 @@ mod tests {
         assert!(texts.iter().any(|text| text == "Alámbrico"));
         assert!(texts.iter().any(|text| text == "Material: Sin material"));
         assert!(texts.iter().any(|text| text == "Luces: 0"));
-        assert!(texts.iter().any(|text| text == "Entorno: Sólido"));
+        assert!(texts.iter().any(|text| text == "Entorno: Degradado"));
     }
 
     #[test]
