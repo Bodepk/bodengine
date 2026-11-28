@@ -114,6 +114,8 @@ pub enum EditorCommand {
     MaterialEdit,
     /// Marca un cambio en el sidecar de luces del editor (E49). No toca la escena.
     LightEdit,
+    /// Marca un cambio en el sidecar de entorno del editor (E50). No toca la escena.
+    EnvironmentEdit,
 }
 
 impl EditorCommand {
@@ -142,6 +144,7 @@ impl EditorCommand {
             Self::UpdatePrefab { .. } => "Actualizar plantilla",
             Self::MaterialEdit => "Editar material",
             Self::LightEdit => "Editar luz",
+            Self::EnvironmentEdit => "Editar entorno",
         }
     }
 }
@@ -605,6 +608,7 @@ fn mutate(
         }
         EditorCommand::MaterialEdit => {}
         EditorCommand::LightEdit => {}
+        EditorCommand::EnvironmentEdit => {}
     }
     Ok(())
 }
@@ -700,6 +704,25 @@ mod tests {
         assert!(document.undo());
         assert_eq!(document.undo_len(), 0);
         assert_eq!(document.redo_len(), 1);
+        assert!(document.redo());
+        assert_eq!(document.scene(), &before);
+    }
+
+    #[test]
+    fn environment_edit_marks_history_without_touching_the_scene() {
+        let mut document = EditorDocument::new();
+        let before = document.scene().clone();
+
+        document
+            .apply(EditorCommand::EnvironmentEdit)
+            .expect("environment edit");
+        assert_eq!(EditorCommand::EnvironmentEdit.label(), "Editar entorno");
+        assert_eq!(document.scene(), &before);
+        assert_eq!(document.undo_len(), 1);
+        assert!(document.is_dirty());
+
+        assert!(document.undo());
+        assert_eq!(document.undo_len(), 0);
         assert!(document.redo());
         assert_eq!(document.scene(), &before);
     }

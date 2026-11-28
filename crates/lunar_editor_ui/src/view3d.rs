@@ -9,6 +9,7 @@ use lunar_scenes::{Component, SceneEntity, Transform};
 use crate::app::EditorApp;
 use crate::assets::AssetKind;
 use crate::dnd::AssetDrag;
+use crate::environment::{Environment, SKY_BANDS, sky_color};
 use crate::gizmo::{Originals, group_pivot, space_axes, translate_group};
 use crate::lights::{AMBIENT, Light, LightKind};
 use crate::play::PlayState;
@@ -396,6 +397,7 @@ fn faces_with<F>(
     rect: Rect,
     base: Color32,
     mode: ShadingMode,
+    fog: Option<&Environment>,
     tint: F,
 ) -> Vec<FaceDraw>
 where
@@ -426,9 +428,13 @@ where
         } else {
             [1.0; 3]
         };
+        let shaded = shade_color_rgb(base, factor);
+        let color = fog.map_or(shaded, |env| {
+            crate::environment::apply_fog(shaded, env, crate::environment::fog_factor(env, depth))
+        });
         faces.push(FaceDraw {
             points: [a, b, c, d],
-            color: shade_color_rgb(base, factor),
+            color,
             depth,
         });
     }
@@ -445,7 +451,7 @@ pub(crate) fn shaded_faces(
     base: Color32,
     mode: ShadingMode,
 ) -> Vec<FaceDraw> {
-    faces_with(transform, camera, rect, base, mode, |normal| {
+    faces_with(transform, camera, rect, base, mode, None, |normal| {
         [shade_factor(normal); 3]
     })
 }
@@ -461,9 +467,15 @@ fn lit_faces(
 ) -> Vec<FaceDraw> {
     let transform = displayed_transform(app, entity);
     let center = transform.translation;
-    faces_with(transform, camera, rect, base, ShadingMode::Lit, |normal| {
-        light_response(samples, center, normal)
-    })
+    faces_with(
+        transform,
+        camera,
+        rect,
+        base,
+        ShadingMode::Lit,
+        Some(&app.environment),
+        |normal| light_response(samples, center, normal),
+    )
 }
 
 /// Color del material asignado a una entidad, si está cargado (ADR-049).
@@ -675,6 +687,21 @@ fn paint_axes(ui: &mut Ui, rect: Rect, camera: Camera3D) {
             ui.painter()
                 .line_segment([origin, tip], Stroke::new(1.5, color));
         }
+    }
+}
+
+/// Fondo del viewport con bandas de cielo deterministas (ADR-051).
+fn paint_sky(app: &EditorApp, ui: &mut Ui, rect: Rect) {
+    let step = rect.height() / SKY_BANDS as f32;
+    for index in 0..SKY_BANDS {
+        let t = (index as f32 + 0.5) / SKY_BANDS as f32;
+        let top = rect.min.y + index as f32 * step;
+        let band = Rect::from_min_max(
+            Pos2::new(rect.min.x, top),
+            Pos2::new(rect.max.x, top + step + 0.5),
+        );
+        ui.painter()
+            .rect_filled(band, 0.0, sky_color(&app.environment, t));
     }
 }
 
@@ -944,6 +971,12 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
             .unwrap_or("Sin material");
         ui.label(format!("Material: {assigned}"));
         ui.label(format!("Luces: {}", app.light_map.len()));
+        let environment = &app.environment;
+        ui.label(format!(
+            "Entorno: {}{}",
+            environment.mode.label(),
+            if environment.fog { " + niebla" } else { "" }
+        ));
         ui.label(format!("Distancia {:.1}", app.camera3d.distance));
         ui.label("Derecho orbitar · central desplazar · rueda zoom");
         ui.separator();
@@ -972,8 +1005,7 @@ pub(crate) fn view3d_ui(app: &mut EditorApp, ui: &mut Ui) {
     });
 
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-    ui.painter()
-        .rect_filled(rect, 0.0, Color32::from_rgb(24, 26, 32));
+    paint_sky(app, ui, rect);
     paint_grid(ui, rect, app.camera3d);
     paint_axes(ui, rect, app.camera3d);
     paint_entities(app, ui, rect, app.camera3d);
@@ -1410,6 +1442,7 @@ mod tests {
         assert!(texts.iter().any(|text| text == "Alámbrico"));
         assert!(texts.iter().any(|text| text == "Material: Sin material"));
         assert!(texts.iter().any(|text| text == "Luces: 0"));
+        assert!(texts.iter().any(|text| text == "Entorno: Sólido"));
     }
 
     #[test]
@@ -1493,5 +1526,83 @@ mod tests {
                 .contains("Suelta el material sobre una entidad")
         }));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn viewport_background_uses_the_editor_environment() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.environment.mode = crate::environment::SkyMode::Gradient;
+        app.environment.top = [1.0, 0.0, 0.0];
+        app.environment.middle = [0.0, 1.0, 0.0];
+        app.environment.bottom = [0.0, 0.0, 1.0];
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0))),
+            ..Default::default()
+        };
+        let mut first = ctx.run_pass(input.clone(), |ctx| {
+            egui::Window::new("Vista 3D de prueba").show(ctx, |ui| view3d_ui(&mut app, ui));
+        });
+        first.textures_delta.clear();
+        let mut output = ctx.run_pass(input, |ctx| {
+            egui::Window::new("Vista 3D de prueba").show(ctx, |ui| view3d_ui(&mut app, ui));
+        });
+        let texts: Vec<String> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        output.textures_delta.clear();
+        assert!(texts.iter().any(|text| text == "Entorno: Degradado"));
+        assert_eq!(
+            sky_color(&app.environment, 0.0),
+            Color32::from_rgb(255, 0, 0)
+        );
+        assert_eq!(
+            sky_color(&app.environment, 0.5),
+            Color32::from_rgb(0, 255, 0)
+        );
+        assert_eq!(
+            sky_color(&app.environment, 1.0),
+            Color32::from_rgb(0, 0, 255)
+        );
+    }
+
+    #[test]
+    fn fog_fades_lit_faces_but_not_solid_ones() {
+        let ctx = egui::Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        app.document = EditorDocument::new();
+        app.apply(EditorCommand::CreateEntity { id: 1, name: None });
+        app.light_map.set(1, Light::default());
+        app.environment.fog = true;
+        app.environment.fog_color = [1.0, 0.0, 0.0];
+        app.environment.fog_start = 0.0;
+        app.environment.fog_end = 100.0;
+        let samples = light_samples(&app);
+        let entity = app.document.scene().entities[0].clone();
+        let lit = lit_faces(
+            &app,
+            &entity,
+            Camera3D::default(),
+            rect(),
+            Color32::WHITE,
+            &samples,
+        );
+        let solid = shaded_faces(
+            Transform::default(),
+            Camera3D::default(),
+            rect(),
+            Color32::WHITE,
+            ShadingMode::Solid,
+        );
+        assert!(
+            lit.iter().any(|face| face.color.r() > face.color.g()),
+            "{lit:?}"
+        );
+        assert!(solid.iter().all(|face| face.color == Color32::WHITE));
     }
 }

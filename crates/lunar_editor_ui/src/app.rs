@@ -8,6 +8,7 @@ use lunar_scenes::{Component, Scene, SceneEntity, SceneError, Transform, normali
 
 use crate::assets::{AssetKind, AssetLibrary, AssetView, assets_ui};
 use crate::canvas::{CanvasDrag, canvas_ui};
+use crate::environment::Environment;
 use crate::file_picker::{FilePicker, PickerMode, absolute_dir, parent_dir};
 use crate::helpers::{
     audio_component, collider2_component, hierarchy_ids, image_component, next_entity_id,
@@ -132,6 +133,13 @@ pub(crate) struct EditorApp {
     light_undo: Vec<LightMap>,
     light_redo: Vec<LightMap>,
     light_map_stamp: u64,
+    /// Entorno del viewport y su historial paralelo (E50, ADR-051).
+    pub(crate) environment: Environment,
+    environment_undo: Vec<Environment>,
+    environment_redo: Vec<Environment>,
+    environment_stamp: u64,
+    /// Ventana de entorno; no se persiste.
+    pub(crate) show_environment: bool,
     pub(crate) view_mode: ViewMode,
     /// Relleno de la vista 3D (ADR-037); no se persiste, como la cámara.
     pub(crate) shading_mode: crate::view3d::ShadingMode,
@@ -249,6 +257,11 @@ impl EditorApp {
             light_undo: Vec::new(),
             light_redo: Vec::new(),
             light_map_stamp: 0,
+            environment: Environment::default(),
+            environment_undo: Vec::new(),
+            environment_redo: Vec::new(),
+            environment_stamp: 0,
+            show_environment: false,
             view_mode: ViewMode::default(),
             shading_mode: settings.shading_mode,
             camera3d: Camera3D::default(),
@@ -275,6 +288,7 @@ impl EditorApp {
         app.load_scripts();
         app.load_materials();
         app.load_lights();
+        app.load_environment();
         app
     }
 
@@ -551,6 +565,57 @@ impl EditorApp {
         });
     }
 
+    /// Ruta del fichero lateral de entorno junto a la escena actual.
+    pub(crate) fn environment_path(&self) -> PathBuf {
+        Self::sidecar_path(&self.path, crate::environment::FILE)
+    }
+
+    /// Lee el entorno sin mutar la escena (E50, ADR-051).
+    pub(crate) fn load_environment(&mut self) {
+        self.environment =
+            crate::environment::load(self.path.parent().unwrap_or_else(|| Path::new(".")));
+        self.environment_stamp = crate::import_options::stamp(&self.environment_path());
+        self.environment_undo.clear();
+        self.environment_redo.clear();
+    }
+
+    fn write_environment_for(&mut self, path: &Path) -> Result<(), String> {
+        let sidecar = Self::sidecar_path(path, crate::environment::FILE);
+        match crate::scripts::atomic_write(&sidecar, &self.environment.encode()) {
+            Ok(()) => {
+                self.environment_stamp = crate::import_options::stamp(&sidecar);
+                Ok(())
+            }
+            Err(error) => Err(format!("No se pudo guardar {}: {error}", sidecar.display())),
+        }
+    }
+
+    fn restore_environment(&mut self, snapshot: Environment) {
+        self.environment = snapshot;
+        if let Err(error) = self.write_environment_for(&self.path.clone()) {
+            self.set_status_level(crate::status::Level::Error, error);
+        }
+    }
+
+    /// Aplica un cambio de cielo/niebla con el mismo historial que los sidecars (ADR-051).
+    pub(crate) fn commit_environment(&mut self, next: Environment) {
+        if !self.ensure_editable() || self.environment == next {
+            return;
+        }
+        let previous = self.environment;
+        if self.try_apply(EditorCommand::EnvironmentEdit).is_err() {
+            return;
+        }
+        self.environment_undo.push(previous);
+        self.environment_redo.clear();
+        self.environment = next;
+        if let Err(error) = self.write_environment_for(&self.path.clone()) {
+            self.set_status_level(crate::status::Level::Error, error);
+            return;
+        }
+        self.set_status(format!("Entorno actualizado · {}", next.mode.label()));
+    }
+
     fn load_script_diagnostics(&mut self) {
         let path = self.script_diagnostics_path();
         self.script_diag_stamp = crate::import_options::stamp(&path);
@@ -623,6 +688,12 @@ impl EditorApp {
         if stamp != 0 && stamp != self.light_map_stamp && !self.document.is_dirty() {
             self.load_lights();
             self.set_status("Luces recargadas desde disco");
+        }
+        let env_path = self.environment_path();
+        let stamp = crate::import_options::stamp(&env_path);
+        if stamp != 0 && stamp != self.environment_stamp && !self.document.is_dirty() {
+            self.load_environment();
+            self.set_status("Entorno recargado desde disco");
         }
     }
 
@@ -767,6 +838,11 @@ impl EditorApp {
                 self.light_redo.push(current);
                 self.restore_lights(previous);
             }
+            if let Some(previous) = self.environment_undo.pop() {
+                let current = self.environment;
+                self.environment_redo.push(current);
+                self.restore_environment(previous);
+            }
             self.revision += 1;
             self.set_status("");
         } else {
@@ -792,6 +868,11 @@ impl EditorApp {
                 let current = self.light_map.clone();
                 self.light_undo.push(current);
                 self.restore_lights(next);
+            }
+            if let Some(next) = self.environment_redo.pop() {
+                let current = self.environment;
+                self.environment_undo.push(current);
+                self.restore_environment(next);
             }
             self.revision += 1;
             self.set_status("");
@@ -864,6 +945,7 @@ impl EditorApp {
                 self.load_scripts();
                 self.load_materials();
                 self.load_lights();
+                self.load_environment();
                 self.refresh_guids();
                 let (rewritten, broken) = self.rewrite_asset_paths();
                 let suffix = Self::describe_guid_changes(rewritten, &broken);
@@ -941,6 +1023,7 @@ impl EditorApp {
                     .write_scripts_for(&path)
                     .and_then(|()| self.write_materials_for(&path))
                     .and_then(|()| self.write_lights_for(&path))
+                    .and_then(|()| self.write_environment_for(&path))
                 {
                     Ok(()) => {
                         self.set_status(format!("Guardada {path:?}{suffix}"));
@@ -979,6 +1062,7 @@ impl EditorApp {
                 self.write_scripts_for(&target)?;
                 self.write_materials_for(&target)?;
                 self.write_lights_for(&target)?;
+                self.write_environment_for(&target)?;
                 self.remember(target.clone());
                 Ok(format!("Guardada {target:?}{suffix}"))
             }
@@ -1008,6 +1092,7 @@ impl EditorApp {
                 self.load_scripts();
                 self.load_materials();
                 self.load_lights();
+                self.load_environment();
                 self.refresh_guids();
                 let (rewritten, broken) = self.rewrite_asset_paths();
                 let suffix = Self::describe_guid_changes(rewritten, &broken);
@@ -1860,6 +1945,13 @@ impl eframe::App for EditorApp {
                 .show(&ctx, |ui| crate::timeline::timeline_ui(self, ui));
             self.show_timeline = timeline_open;
         }
+        let mut environment_open = self.show_environment;
+        if environment_open {
+            egui::Window::new("Entorno 3D")
+                .open(&mut environment_open)
+                .show(&ctx, |ui| crate::environment::environment_ui(self, ui));
+            self.show_environment = environment_open;
+        }
     }
 }
 
@@ -1964,6 +2056,42 @@ mod tests {
             Some("Luz 3D 1")
         );
         assert!(app.light_map.get(1).is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn environment_edit_is_one_undo_step_and_persists() {
+        let ctx = Context::default();
+        let mut app = EditorApp::new(None, &ctx);
+        let root = std::env::temp_dir().join(format!("lunar_env_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::create_dir_all(&root);
+        app.path = root.join("scene.json");
+        app.document = EditorDocument::new();
+        let history = app.document.undo_len();
+        let original = app.environment;
+
+        let mut changed = original;
+        changed.mode = crate::environment::SkyMode::Gradient;
+        changed.fog = true;
+        app.commit_environment(changed);
+
+        assert_eq!(app.environment, changed);
+        assert_eq!(app.document.undo_len(), history + 1);
+        let text = std::fs::read_to_string(app.environment_path()).expect("sidecar");
+        let persisted = crate::environment::Environment::decode(&text);
+        assert_eq!(persisted.mode, changed.mode);
+        assert_eq!(persisted.fog, changed.fog);
+        app.undo();
+        assert_eq!(app.environment, original);
+        let restored = crate::environment::load(&root);
+        assert_eq!(restored.mode, original.mode);
+        assert_eq!(restored.fog, original.fog);
+        app.redo();
+        assert_eq!(app.environment, changed);
+        let persisted = crate::environment::load(&root);
+        assert_eq!(persisted.mode, changed.mode);
+        assert_eq!(persisted.fog, changed.fog);
         let _ = std::fs::remove_dir_all(&root);
     }
 

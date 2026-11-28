@@ -67,6 +67,7 @@ Los ADR no se editan para borrar el historial de una decisión: si cambia el cri
 | [048](ADR-048-fuera-fase-shaders-gpu.md) | Fuera de Fase 3: shader graph, shaders de usuario y PBR GPU | Aceptada |
 | [049](ADR-049-materiales-en-viewport-3d.md) | Materiales del editor en el viewport 3D y asignación por entidad | Aceptada |
 | [050](ADR-050-luces-editor-viewport.md) | Luces del editor en el viewport 3D | Aceptada |
+| [051](ADR-051-entorno-cielo-cpu-viewport.md) | Entorno y cielo CPU del viewport 3D | Aceptada |
 
 ## Consecuencias
 

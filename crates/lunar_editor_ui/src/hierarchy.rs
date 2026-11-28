@@ -68,6 +68,9 @@ pub(crate) fn toolbar_ui(app: &mut EditorApp, ui: &mut Ui) {
             app.show_validation = !app.show_validation;
             app.run_validation();
         }
+        if ui.button("Entorno").clicked() {
+            app.show_environment = !app.show_environment;
+        }
         ui.separator();
         ui.label(format!(
             "{} entidad(es)",

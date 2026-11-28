@@ -12,6 +12,7 @@ mod config;
 mod console;
 mod dialogs;
 mod dnd;
+mod environment;
 mod file_picker;
 mod gizmo;
 mod guids;
